@@ -164,7 +164,7 @@ export default function SettingsScreen() {
 
   return (
     <View className="flex-1 bg-white">
-      <View className="pt-12 pb-4 px-4 bg-blue-500">
+      <View className="pt-4 pb-4 px-4 bg-blue-500">
         <Text className="text-2xl font-bold text-white">설정</Text>
       </View>
 

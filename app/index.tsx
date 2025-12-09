@@ -1,31 +1,12 @@
-import { supabase } from '@/lib/supabase';
-import { Redirect } from 'expo-router';
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Text, View } from 'react-native';
+import { Redirect } from "expo-router";
 
-type Status = 'loading' | 'signed-in' | 'signed-out';
+import { ActivityIndicator, Text, View } from "react-native";
+import { useAuth } from '../hooks/useAuth';
 
 export default function Index() {
-  const [status, setStatus] = useState<Status>('loading');
+  const { session, loading } = useAuth();
 
-  useEffect(() => {
-    const init = async () => {
-      const { data } = await supabase.auth.getSession();
-      setStatus(data.session ? 'signed-in' : 'signed-out');
-    };
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setStatus(session ? 'signed-in' : 'signed-out');
-    });
-
-    init();
-
-    return () => subscription.unsubscribe();
-  }, []);
-
-  if (status === 'loading') {
+  if (loading) {
     return (
       <View className="flex-1 bg-blue-500 items-center justify-center">
         <Text className="text-white text-3xl font-bold mb-2">BudgetBook</Text>
@@ -35,10 +16,14 @@ export default function Index() {
     );
   }
 
-  if (status === 'signed-in') {
-    return <Redirect href="/(tabs)" />;
+  if (!session) {
+    console.log("session is null");
+    return (
+      <Redirect href="/login" />
+    );
   }
 
-  return <Redirect href="/login" />;
+  return (
+    <Redirect href="/(tabs)" />
+  );
 }
-
