@@ -227,8 +227,8 @@ export default function HomeScreen() {
   };
 
   const handleSave = async () => {
-    if (!formData.category || !formData.amount || !formData.description) {
-      Alert.alert("오류", "모든 필드를 입력해주세요.");
+    if (!formData.amount) {
+      Alert.alert("오류", "금액을 입력해주세요.");
       return;
     }
 
@@ -238,24 +238,27 @@ export default function HomeScreen() {
       return;
     }
 
+    const category = formData.category || "미분류";
+    const description = formData.description || "";
+
     if (editingTransaction) {
       const updated: Transaction = {
         ...editingTransaction,
         date: formData.date,
         type: formData.type,
-        category: formData.category,
+        category,
         amount,
-        description: formData.description,
+        description,
       };
       await updateTransaction(editingTransaction.id, updated);
     } else {
       const newTransaction: Transaction = {
-        id: Date.now().toString(),
+        id: '', // UUID는 addTransaction에서 생성됨
         date: formData.date,
         type: formData.type,
-        category: formData.category,
+        category,
         amount,
-        description: formData.description,
+        description,
         createdAt: Date.now(),
       };
       await addTransaction(newTransaction);

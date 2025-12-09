@@ -1,72 +1,185 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '@/lib/supabase';
 import { Transaction } from '@/types/transaction';
 import { getUserParty } from './party';
 
-const STORAGE_KEY = '@budgetbook_transactions';
+// UUID 생성 함수
+const generateUUID = (): string => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
+// Supabase에서 Transaction을 앱의 Transaction 타입으로 변환
+const mapSupabaseToTransaction = (row: any): Transaction => {
+  return {
+    id: row.id,
+    date: row.date,
+    type: row.type,
+    category: row.category,
+    amount: parseFloat(row.amount),
+    description: row.description,
+    createdAt: new Date(row.created_at).getTime(),
+    partyId: row.party_id || undefined,
+  };
+};
 
 export const saveTransactions = async (transactions: Transaction[]): Promise<void> => {
-  try {
-    const jsonValue = JSON.stringify(transactions);
-    await AsyncStorage.setItem(STORAGE_KEY, jsonValue);
-  } catch (e) {
-    console.error('Error saving transactions:', e);
-  }
+  // 이 함수는 더 이상 사용되지 않지만 호환성을 위해 유지
+  console.warn('saveTransactions is deprecated. Use individual CRUD operations instead.');
 };
 
 export const loadTransactions = async (): Promise<Transaction[]> => {
   try {
-    const userParty = await getUserParty();
-    const jsonValue = await AsyncStorage.getItem(STORAGE_KEY);
-    const allTransactions: Transaction[] = jsonValue != null ? JSON.parse(jsonValue) : [];
-    
-    // 파티에 속한 경우 해당 파티의 거래만, 아니면 파티가 없는 거래만
-    if (userParty) {
-      return allTransactions.filter(t => !t.partyId || t.partyId === userParty.partyId);
-    } else {
-      return allTransactions.filter(t => !t.partyId);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      console.warn('No user session found');
+      return [];
     }
+
+    const userParty = await getUserParty();
+    
+    // 파티에 속한 경우: 내 개인 거래 + 파티 거래 모두 조회
+    let query = supabase
+      .from('transactions')
+      .select('*')
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
+
+    if (userParty) {
+      query = query.or(
+        `and(user_id.eq.${session.user.id},party_id.is.null),party_id.eq.${userParty.partyId}`
+      );
+    } else {
+      query = query.eq('user_id', session.user.id).is('party_id', null);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error loading transactions:', error);
+      return [];
+    }
+
+    return (data || []).map(mapSupabaseToTransaction);
   } catch (e) {
     console.error('Error loading transactions:', e);
     return [];
   }
 };
 
-export const addTransaction = async (transaction: Transaction): Promise<void> => {
-  const userParty = await getUserParty();
-  const transactions = await loadTransactions();
-  
-  // 파티에 속한 경우 partyId 추가
-  const newTransaction: Transaction = {
-    ...transaction,
-    partyId: userParty?.partyId,
-  };
-  
-  // 전체 거래 목록에 추가 (파티 필터링 없이)
-  const jsonValue = await AsyncStorage.getItem(STORAGE_KEY);
-  const allTransactions: Transaction[] = jsonValue != null ? JSON.parse(jsonValue) : [];
-  allTransactions.push(newTransaction);
-  await saveTransactions(allTransactions);
+export const addTransaction = async (transaction: Transaction): Promise<Transaction> => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      throw new Error('No user session found');
+    }
+
+    const userParty = await getUserParty();
+
+    // UUID 형식인지 확인, 아니면 새로 생성
+    const transactionId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transaction.id)
+      ? transaction.id
+      : generateUUID();
+
+    const { data, error } = await supabase
+      .from('transactions')
+      .insert({
+        id: transactionId,
+        user_id: session.user.id,
+        party_id: userParty?.partyId || null,
+        date: transaction.date,
+        type: transaction.type,
+        category: transaction.category,
+        amount: transaction.amount,
+        description: transaction.description,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding transaction:', error);
+      throw error;
+    }
+
+    return mapSupabaseToTransaction(data);
+  } catch (e) {
+    console.error('Error adding transaction:', e);
+    throw e;
+  }
 };
 
 export const updateTransaction = async (id: string, updatedTransaction: Transaction): Promise<void> => {
-  const userParty = await getUserParty();
-  const jsonValue = await AsyncStorage.getItem(STORAGE_KEY);
-  const allTransactions: Transaction[] = jsonValue != null ? JSON.parse(jsonValue) : [];
-  const index = allTransactions.findIndex(t => t.id === id);
-  
-  if (index !== -1) {
-    allTransactions[index] = {
-      ...updatedTransaction,
-      partyId: userParty?.partyId || allTransactions[index].partyId,
-    };
-    await saveTransactions(allTransactions);
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      throw new Error('No user session found');
+    }
+
+    const userParty = await getUserParty();
+
+    const { error } = await supabase
+      .from('transactions')
+      .update({
+        date: updatedTransaction.date,
+        type: updatedTransaction.type,
+        category: updatedTransaction.category,
+        amount: updatedTransaction.amount,
+        description: updatedTransaction.description,
+        party_id: userParty?.partyId || null,
+      })
+      .eq('id', id)
+      .eq('user_id', session.user.id);
+
+    if (error) {
+      console.error('Error updating transaction:', error);
+      throw error;
+    }
+  } catch (e) {
+    console.error('Error updating transaction:', e);
+    throw e;
   }
 };
 
 export const deleteTransaction = async (id: string): Promise<void> => {
-  const jsonValue = await AsyncStorage.getItem(STORAGE_KEY);
-  const allTransactions: Transaction[] = jsonValue != null ? JSON.parse(jsonValue) : [];
-  const filtered = allTransactions.filter(t => t.id !== id);
-  await saveTransactions(filtered);
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      throw new Error('No user session found');
+    }
+
+    const { error } = await supabase
+      .from('transactions')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', session.user.id);
+
+    if (error) {
+      console.error('Error deleting transaction:', error);
+      throw error;
+    }
+  } catch (e) {
+    console.error('Error deleting transaction:', e);
+    throw e;
+  }
+};
+
+// 개인 거래(파티 미소속 데이터) 전부 삭제
+export const deletePersonalTransactions = async (): Promise<void> => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+    const { error } = await supabase
+      .from('transactions')
+      .delete()
+      .eq('user_id', session.user.id)
+      .is('party_id', null);
+    if (error) {
+      console.error('Error deleting personal transactions:', error);
+    }
+  } catch (e) {
+    console.error('Error deleting personal transactions:', e);
+  }
 };
 

@@ -1,100 +1,181 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase } from '@/lib/supabase';
 import { Category } from '@/types/category';
 import { TransactionType } from '@/types/transaction';
 import { getUserParty } from './party';
 
-const CATEGORIES_STORAGE_KEY = '@budgetbook_categories';
+// UUID 생성 함수
+const generateUUID = (): string => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
 
-// 기본 카테고리 가져오기
-export const getDefaultCategories = (type: TransactionType): string[] => {
-  if (type === 'income') {
-    return ['급여', '용돈', '부수입', '기타 수입'];
-  }
-  return ['식비', '교통비', '쇼핑', '문화생활', '의료비', '통신비', '기타 지출'];
+// Supabase에서 Category를 앱의 Category 타입으로 변환
+const mapSupabaseToCategory = (row: any): Category => {
+  return {
+    id: row.id,
+    type: row.type,
+    name: row.name,
+    partyId: row.party_id || undefined,
+    createdAt: new Date(row.created_at).getTime(),
+  };
 };
 
 // 카테고리 로드
 export const loadCategories = async (): Promise<Category[]> => {
   try {
-    const jsonValue = await AsyncStorage.getItem(CATEGORIES_STORAGE_KEY);
-    const saved: Category[] = jsonValue != null ? JSON.parse(jsonValue) : [];
-    
-    // 기본 카테고리가 없으면 생성
-    if (saved.length === 0) {
-      const defaultCategories: Category[] = [
-        ...getDefaultCategories('income').map((name, index) => ({
-          id: `cat_income_${index}`,
-          type: 'income' as TransactionType,
-          name,
-          createdAt: Date.now(),
-        })),
-        ...getDefaultCategories('expense').map((name, index) => ({
-          id: `cat_expense_${index}`,
-          type: 'expense' as TransactionType,
-          name,
-          createdAt: Date.now(),
-        })),
-      ];
-      await saveCategories(defaultCategories);
-      return defaultCategories;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      console.warn('No user session found');
+      return [];
     }
+
+    const userParty = await getUserParty();
     
-    return saved;
+    // 파티에 속한 경우: 내 개인 카테고리 + 파티 카테고리 모두 조회
+    let query = supabase
+      .from('categories')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (userParty) {
+      query = query.or(
+        `and(user_id.eq.${session.user.id},party_id.is.null),party_id.eq.${userParty.partyId}`
+      );
+    } else {
+      query = query.eq('user_id', session.user.id).is('party_id', null);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error loading categories:', error);
+      return [];
+    }
+
+    return (data || []).map(mapSupabaseToCategory);
   } catch (e) {
     console.error('Error loading categories:', e);
     return [];
   }
 };
 
-// 카테고리 저장
+// 카테고리 저장 (호환성을 위해 유지)
 export const saveCategories = async (categories: Category[]): Promise<void> => {
-  try {
-    await AsyncStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categories));
-  } catch (e) {
-    console.error('Error saving categories:', e);
-  }
+  console.warn('saveCategories is deprecated. Use individual CRUD operations instead.');
 };
 
 // 카테고리 추가
 export const addCategory = async (type: TransactionType, name: string): Promise<Category> => {
-  const categories = await loadCategories();
-  const userParty = await getUserParty();
-  
-  const newCategory: Category = {
-    id: `cat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-    type,
-    name,
-    partyId: userParty?.partyId,
-    createdAt: Date.now(),
-  };
-  
-  categories.push(newCategory);
-  await saveCategories(categories);
-  return newCategory;
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      throw new Error('No user session found');
+    }
+
+    const userParty = await getUserParty();
+    const categoryId = generateUUID();
+
+    const { data, error } = await supabase
+      .from('categories')
+      .insert({
+        id: categoryId,
+        user_id: session.user.id,
+        party_id: userParty?.partyId || null,
+        type,
+        name,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding category:', error);
+      throw error;
+    }
+
+    return mapSupabaseToCategory(data);
+  } catch (e) {
+    console.error('Error adding category:', e);
+    throw e;
+  }
 };
 
 // 카테고리 수정
 export const updateCategory = async (id: string, name: string): Promise<void> => {
-  const categories = await loadCategories();
-  const index = categories.findIndex(c => c.id === id);
-  if (index !== -1) {
-    categories[index].name = name;
-    await saveCategories(categories);
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      throw new Error('No user session found');
+    }
+
+    const { error } = await supabase
+      .from('categories')
+      .update({ name })
+      .eq('id', id)
+      .eq('user_id', session.user.id);
+
+    if (error) {
+      console.error('Error updating category:', error);
+      throw error;
+    }
+  } catch (e) {
+    console.error('Error updating category:', e);
+    throw e;
   }
 };
 
 // 카테고리 삭제
 export const deleteCategory = async (id: string): Promise<void> => {
-  const categories = await loadCategories();
-  const filtered = categories.filter(c => c.id !== id);
-  await saveCategories(filtered);
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      throw new Error('No user session found');
+    }
+
+    const { error } = await supabase
+      .from('categories')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', session.user.id);
+
+    if (error) {
+      console.error('Error deleting category:', error);
+      throw error;
+    }
+  } catch (e) {
+    console.error('Error deleting category:', e);
+    throw e;
+  }
 };
 
 // 타입별 카테고리 가져오기
 export const getCategoriesByType = async (type: TransactionType): Promise<string[]> => {
   const categories = await loadCategories();
-  return categories
+  const names = categories
     .filter(c => c.type === type)
     .map(c => c.name);
+
+  // 중복 제거 후 정렬
+  return Array.from(new Set(names)).sort();
+};
+
+// 개인 카테고리(파티 미소속 데이터) 전부 삭제
+export const deletePersonalCategories = async (): Promise<void> => {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+    const { error } = await supabase
+      .from('categories')
+      .delete()
+      .eq('user_id', session.user.id)
+      .is('party_id', null);
+    if (error) {
+      console.error('Error deleting personal categories:', error);
+    }
+  } catch (e) {
+    console.error('Error deleting personal categories:', e);
+  }
 };
 

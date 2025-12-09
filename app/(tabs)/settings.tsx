@@ -1,8 +1,9 @@
 import { Category } from '@/types/category';
 import { Party, UserParty } from '@/types/party';
 import { TransactionType } from '@/types/transaction';
-import { addCategory, deleteCategory, loadCategories, updateCategory } from '@/utils/category';
-import { createParty, deleteParty, getParty, getUserParty, joinPartyByCode, leaveParty } from '@/utils/party';
+import { addCategory, deleteCategory, deletePersonalCategories, loadCategories, updateCategory } from '@/utils/category';
+import { createParty, deleteParty, getParty, getUserParty, joinPartyByCode, leaveParty, removePartyMember } from '@/utils/party';
+import { deletePersonalTransactions } from '@/utils/storage';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
 import { Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -58,21 +59,38 @@ export default function SettingsScreen() {
       return;
     }
 
-    const joinedParty = await joinPartyByCode(inviteCodeInput.trim().toUpperCase());
-    if (joinedParty) {
-      setParty(joinedParty);
-      setUserParty({
-        partyId: joinedParty.id,
-        role: 'member',
-        joinedAt: Date.now(),
-      });
-      setInviteCodeInput('');
-      setJoinCodeModalVisible(false);
-      Alert.alert('성공', '파티에 참가했습니다!');
-      await loadData();
-    } else {
-      Alert.alert('오류', '유효하지 않은 초대코드입니다.');
-    }
+    Alert.alert(
+      '파티 참가',
+      '파티에 가입하면 개인 가계부 데이터가 삭제되고 파티장의 가계부로 동기화됩니다. 계속하시겠습니까?',
+      [
+        { text: '취소', style: 'cancel' },
+        {
+          text: '확인',
+          style: 'destructive',
+          onPress: async () => {
+            const joinedParty = await joinPartyByCode(inviteCodeInput.trim().toUpperCase());
+            if (joinedParty) {
+              // 개인 데이터 정리
+              await deletePersonalTransactions();
+              await deletePersonalCategories();
+
+              setParty(joinedParty);
+              setUserParty({
+                partyId: joinedParty.id,
+                role: 'member',
+                joinedAt: Date.now(),
+              });
+              setInviteCodeInput('');
+              setJoinCodeModalVisible(false);
+              Alert.alert('성공', '파티에 참가했습니다!');
+              await loadData();
+            } else {
+              Alert.alert('오류', '유효하지 않은 초대코드입니다.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleLeaveParty = () => {
@@ -107,6 +125,21 @@ export default function SettingsScreen() {
           setParty(null);
           setUserParty(null);
           Alert.alert('완료', '파티가 삭제되었습니다.');
+        },
+      },
+    ]);
+  };
+
+  const handleRemoveMember = (memberId: string) => {
+    if (!party || !userParty) return;
+    Alert.alert('파티원 강퇴', '정말 강퇴하시겠습니까?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '강퇴',
+        style: 'destructive',
+        onPress: async () => {
+          await removePartyMember(party.id, memberId);
+          await loadData();
         },
       },
     ]);
@@ -187,20 +220,53 @@ export default function SettingsScreen() {
                 </View>
               </View>
               
-              <View className="mt-3 mb-3">
-                <Text className="text-gray-600 text-sm mb-1">초대코드</Text>
-                <View className="flex-row items-center">
-                  <Text className="text-2xl font-bold text-blue-600 mr-2">{party.inviteCode}</Text>
-                  <TouchableOpacity
-                    onPress={async () => {
-                      await Clipboard.setStringAsync(party.inviteCode);
-                      Alert.alert('복사 완료', '초대코드가 클립보드에 복사되었습니다.');
-                    }}
-                    className="bg-blue-500 px-3 py-1 rounded"
-                  >
-                    <Text className="text-white text-xs">복사</Text>
-                  </TouchableOpacity>
+              {userParty?.role === 'host' && (
+                <View className="mt-3 mb-3">
+                  <Text className="text-gray-600 text-sm mb-1">초대코드</Text>
+                  <View className="flex-row items-center">
+                    <Text className="text-2xl font-bold text-blue-600 mr-2">{party.inviteCode}</Text>
+                    <TouchableOpacity
+                      onPress={async () => {
+                        await Clipboard.setStringAsync(party.inviteCode);
+                        Alert.alert('복사 완료', '초대코드가 클립보드에 복사되었습니다.');
+                      }}
+                      className="bg-blue-500 px-3 py-1 rounded"
+                    >
+                      <Text className="text-white text-xs">복사</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
+              )}
+
+              <View className="mt-2">
+                <Text className="text-gray-600 text-sm mb-2">파티 멤버</Text>
+                {party.members?.map((member) => {
+                  const isHost = member.role === 'host';
+                  const name =
+                    member.displayName ||
+                    `${member.userId.slice(0, 8)}...${member.userId.slice(-4)}`;
+                  return (
+                    <View
+                      key={member.userId}
+                      className="flex-row items-center justify-between bg-white rounded-lg p-3 mb-2 border border-gray-200"
+                    >
+                      <View>
+                        <Text className="text-gray-800 font-semibold">{name}</Text>
+                        <Text className="text-gray-500 text-xs">
+                          {isHost ? '파티장' : '파티원'}
+                        </Text>
+                      </View>
+                      {userParty?.role === 'host' && !isHost && (
+                        <TouchableOpacity
+                          onPress={() => handleRemoveMember(member.userId)}
+                          className="bg-red-500 px-3 py-1 rounded"
+                        >
+                          <Text className="text-white text-xs">강퇴</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
 
               <View className="flex-row gap-2 mt-3">

@@ -10,6 +10,7 @@ export interface PartyMember {
   userId: string;
   role: 'host' | 'member';
   joinedAt: number;
+  displayName?: string;
 }
 
 export interface UserParty {
