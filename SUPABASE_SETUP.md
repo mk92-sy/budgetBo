@@ -31,11 +31,65 @@ supabase db push
 
 ## 4. Google OAuth 설정
 
+### 4-1. Google Cloud Console 설정
+
+1. [Google Cloud Console](https://console.cloud.google.com/)에 접속합니다.
+2. 새 프로젝트를 생성하거나 기존 프로젝트를 선택합니다.
+3. **APIs & Services** > **OAuth consent screen**으로 이동합니다:
+   - User Type을 선택 (일반적으로 "External" 선택)
+   - 앱 정보 입력 (앱 이름, 사용자 지원 이메일, 개발자 연락처 정보)
+   - Scopes는 기본값으로 두어도 됩니다
+   - 테스트 사용자 추가 (개발 중인 경우)
+
+4. **APIs & Services** > **Credentials**로 이동합니다.
+5. **+ CREATE CREDENTIALS** > **OAuth client ID**를 선택합니다.
+6. Application type을 **Web application**으로 선택합니다.
+7. **Authorized redirect URIs**에 다음 URL을 추가합니다:
+   ```
+   https://[your-project-ref].supabase.co/auth/v1/callback
+   ```
+   - `[your-project-ref]`는 Supabase 프로젝트의 참조 ID입니다
+   - Supabase 대시보드 > Settings > API에서 확인할 수 있습니다
+   - 예: `https://bxbbvdozwjxpwgcqdpzd.supabase.co/auth/v1/callback`
+   - **참고**: 모바일 앱만 사용하는 경우 이 URL 하나만 추가하면 됩니다
+   - 웹도 함께 사용하는 경우 웹 URL도 추가해야 합니다 (예: `http://localhost:8081/auth/callback`)
+
+8. **Authorized JavaScript origins**에는 다음을 추가합니다:
+   ```
+   https://[your-project-ref].supabase.co
+   ```
+   - 예: `https://bxbbvdozwjxpwgcqdpzd.supabase.co`
+   - **중요**: 프로토콜(`https://`)은 포함하되, 경로(`/auth/v1/callback` 등)는 포함하지 않습니다
+   - 웹도 사용하는 경우 웹 도메인도 추가합니다 (예: `http://localhost:8081`)
+
+9. 생성된 **Client ID**와 **Client Secret**을 복사합니다.
+
+### 4-2. Supabase 설정
+
 1. Supabase 대시보드에서 **Authentication** > **Providers**로 이동합니다.
 2. **Google**을 활성화합니다.
-3. Google Cloud Console에서 OAuth 2.0 클라이언트 ID를 생성하고:
-   - Authorized redirect URIs에 Supabase 콜백 URL 추가
-   - Client ID와 Client Secret을 Supabase에 입력합니다.
+3. Google Cloud Console에서 복사한 **Client ID**와 **Client Secret**을 입력합니다.
+4. **Save**를 클릭합니다.
+
+4. **중요: 리다이렉트 URL 설정**
+   Supabase 대시보드에서 **Authentication** > **URL Configuration**로 이동하여 다음 URL들을 추가합니다:
+
+   - **Site URL**:
+     - 모바일 앱만 사용하는 경우: 기본값 그대로 두어도 됩니다 (예: `http://localhost:3000`)
+     - 웹도 함께 사용하는 경우: 웹 애플리케이션의 URL을 설정 (예: `http://localhost:8081` 또는 프로덕션 도메인)
+
+   - **Redirect URLs** (반드시 추가 필요):
+     - 개발 환경 (Expo Go):
+       - `exp://localhost:8081/--/auth/callback`
+       - `exp://192.168.x.x:8081/--/auth/callback` (로컬 네트워크 IP 사용 시)
+       - **참고**: `--`는 Expo Router의 경로 구분자로, 고정된 구문입니다. 임의의 문자열이 아닙니다.
+
+     - 프로덕션 (빌드된 앱):
+       - `budgetbook://auth/callback`
+
+     - 웹:
+       - `http://localhost:8081/auth/callback` (로컬 개발)
+       - 실제 도메인 URL (프로덕션)
 
 ## 5. 데이터베이스 구조
 

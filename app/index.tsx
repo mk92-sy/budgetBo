@@ -1,10 +1,9 @@
 import { Redirect } from "expo-router";
-
 import { ActivityIndicator, Text, View } from "react-native";
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from "../hooks/useAuth";
 
 export default function Index() {
-  const { session, loading } = useAuth();
+  const { session, loading, isGuest } = useAuth();
 
   if (loading) {
     return (
@@ -16,14 +15,9 @@ export default function Index() {
     );
   }
 
-  if (!session) {
-    console.log("session is null");
-    return (
-      <Redirect href="/login" />
-    );
+  if (!session && !isGuest) {
+    return <Redirect href="/login" />;
   }
 
-  return (
-    <Redirect href="/(tabs)" />
-  );
+  return <Redirect href="/(tabs)" />;
 }

@@ -2,3 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Pretendard web font (via CDN) */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+
+:root, html, body {
+	font-family: Pretendard, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* Ensure tailwind base fonts prefer Pretendard on web */
+.font-sans {
+	font-family: Pretendard, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans KR', sans-serif;
+}
+

@@ -1,6 +1,8 @@
 import { supabase } from '@/lib/supabase';
 import { Category } from '@/types/category';
 import { TransactionType } from '@/types/transaction';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuthMode } from './authMode';
 import { getUserParty } from './party';
 
 // UUID 생성 함수
@@ -23,9 +25,31 @@ const mapSupabaseToCategory = (row: any): Category => {
   };
 };
 
+const LOCAL_CATEGORY_KEY = 'bb_local_categories';
+
+const loadLocalCategories = async (): Promise<Category[]> => {
+  const raw = await AsyncStorage.getItem(LOCAL_CATEGORY_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error parsing local categories', e);
+    return [];
+  }
+};
+
+const saveLocalCategories = async (categories: Category[]) => {
+  await AsyncStorage.setItem(LOCAL_CATEGORY_KEY, JSON.stringify(categories));
+};
+
 // 카테고리 로드
 export const loadCategories = async (): Promise<Category[]> => {
   try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      return await loadLocalCategories();
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       console.warn('No user session found');
@@ -34,7 +58,6 @@ export const loadCategories = async (): Promise<Category[]> => {
 
     const userParty = await getUserParty();
     
-    // 파티에 속한 경우: 내 개인 카테고리 + 파티 카테고리 모두 조회
     let query = supabase
       .from('categories')
       .select('*')
@@ -69,6 +92,19 @@ export const saveCategories = async (categories: Category[]): Promise<void> => {
 
 // 카테고리 추가
 export const addCategory = async (type: TransactionType, name: string): Promise<Category> => {
+  const mode = await getAuthMode();
+  if (mode === 'guest') {
+    const existing = await loadLocalCategories();
+    const newCategory: Category = {
+      id: generateUUID(),
+      type,
+      name,
+      createdAt: Date.now(),
+    };
+    await saveLocalCategories([...existing, newCategory]);
+    return newCategory;
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -104,6 +140,13 @@ export const addCategory = async (type: TransactionType, name: string): Promise<
 
 // 카테고리 수정
 export const updateCategory = async (id: string, name: string): Promise<void> => {
+  const mode = await getAuthMode();
+  if (mode === 'guest') {
+    const list = await loadLocalCategories();
+    const updated = list.map((c) => (c.id === id ? { ...c, name } : c));
+    await saveLocalCategories(updated);
+    return;
+  }
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -128,6 +171,12 @@ export const updateCategory = async (id: string, name: string): Promise<void> =>
 
 // 카테고리 삭제
 export const deleteCategory = async (id: string): Promise<void> => {
+  const mode = await getAuthMode();
+  if (mode === 'guest') {
+    const list = await loadLocalCategories();
+    await saveLocalCategories(list.filter((c) => c.id !== id));
+    return;
+  }
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -163,6 +212,11 @@ export const getCategoriesByType = async (type: TransactionType): Promise<string
 
 // 개인 카테고리(파티 미소속 데이터) 전부 삭제
 export const deletePersonalCategories = async (): Promise<void> => {
+  const mode = await getAuthMode();
+  if (mode === 'guest') {
+    await saveLocalCategories([]);
+    return;
+  }
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) return;

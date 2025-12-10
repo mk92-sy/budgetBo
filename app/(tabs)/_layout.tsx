@@ -3,24 +3,41 @@ import { Colors } from "@/constants/theme";
 import { ModalProvider, useModal } from "@/contexts/ModalContext";
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { Tabs } from "expo-router";
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 //icons
 import { Ionicons } from "@expo/vector-icons";
-import { Text, TouchableOpacity } from "react-native";
+import { Text, TouchableOpacity, View } from "react-native";
 
 function TabsContent() {
   const colorScheme = useColorScheme();
   const { openModal } = useModal();
+  const insets = useSafeAreaInsets();
 
   return (
-    <Tabs
+    <>
+      <View
+        style={{
+          position: "absolute",
+          top: insets.top === 0 ? 0 : 0,
+          left: 0,
+          right: 0,
+          height: insets.top ?? 0,
+          backgroundColor: "#3b82f6",
+          zIndex: 50,
+        }}
+      />
+      <Tabs
       screenOptions={{
         tabBarActiveTintColor: Colors[colorScheme ?? "light"].tint,
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarStyle: {
+          bottom: insets.bottom,
           height: 70,
-          paddingBottom: 10,
+          paddingBottom: 6,
+          paddingTop: 6,
+          backgroundColor: "#000",
         },
       }}
     >
@@ -56,7 +73,10 @@ function TabsContent() {
                 backgroundColor: "#3b82f6",
                 justifyContent: "center",
                 alignItems: "center",
-                marginBottom: 30,
+                marginBottom: 10,
+                alignSelf: 'center',
+                marginLeft: 'auto',
+                marginRight: 'auto',
                 shadowColor: "#000",
                 shadowOffset: { width: 0, height: 4 },
                 shadowOpacity: 0.3,
@@ -89,6 +109,7 @@ function TabsContent() {
         }}
       />
     </Tabs>
+    </>
   );
 }
 

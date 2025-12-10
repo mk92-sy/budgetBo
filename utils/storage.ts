@@ -1,5 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { Transaction } from '@/types/transaction';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuthMode } from './authMode';
 import { getUserParty } from './party';
 
 // UUID 생성 함수
@@ -30,17 +32,37 @@ export const saveTransactions = async (transactions: Transaction[]): Promise<voi
   console.warn('saveTransactions is deprecated. Use individual CRUD operations instead.');
 };
 
+const LOCAL_TX_KEY = 'bb_local_transactions';
+
+const loadLocalTransactions = async (): Promise<Transaction[]> => {
+  const raw = await AsyncStorage.getItem(LOCAL_TX_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    console.error('Error parsing local transactions', e);
+    return [];
+  }
+};
+
+const saveLocalTransactions = async (transactions: Transaction[]) => {
+  await AsyncStorage.setItem(LOCAL_TX_KEY, JSON.stringify(transactions));
+};
+
 export const loadTransactions = async (): Promise<Transaction[]> => {
   try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      return await loadLocalTransactions();
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
-      console.warn('No user session found');
       return [];
     }
 
     const userParty = await getUserParty();
     
-    // 파티에 속한 경우: 내 개인 거래 + 파티 거래 모두 조회
     let query = supabase
       .from('transactions')
       .select('*')
@@ -70,6 +92,15 @@ export const loadTransactions = async (): Promise<Transaction[]> => {
 };
 
 export const addTransaction = async (transaction: Transaction): Promise<Transaction> => {
+  const mode = await getAuthMode();
+  if (mode === 'guest') {
+    const list = await loadLocalTransactions();
+    const tx = { ...transaction, id: transaction.id || generateUUID(), createdAt: Date.now() };
+    const updated = [tx, ...list];
+    await saveLocalTransactions(updated);
+    return tx;
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -78,7 +109,6 @@ export const addTransaction = async (transaction: Transaction): Promise<Transact
 
     const userParty = await getUserParty();
 
-    // UUID 형식인지 확인, 아니면 새로 생성
     const transactionId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(transaction.id)
       ? transaction.id
       : generateUUID();
@@ -111,6 +141,14 @@ export const addTransaction = async (transaction: Transaction): Promise<Transact
 };
 
 export const updateTransaction = async (id: string, updatedTransaction: Transaction): Promise<void> => {
+  const mode = await getAuthMode();
+  if (mode === 'guest') {
+    const list = await loadLocalTransactions();
+    const updatedList = list.map((tx) => (tx.id === id ? { ...tx, ...updatedTransaction } : tx));
+    await saveLocalTransactions(updatedList);
+    return;
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -143,6 +181,14 @@ export const updateTransaction = async (id: string, updatedTransaction: Transact
 };
 
 export const deleteTransaction = async (id: string): Promise<void> => {
+  const mode = await getAuthMode();
+  if (mode === 'guest') {
+    const list = await loadLocalTransactions();
+    const updated = list.filter((tx) => tx.id !== id);
+    await saveLocalTransactions(updated);
+    return;
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
@@ -167,6 +213,11 @@ export const deleteTransaction = async (id: string): Promise<void> => {
 
 // 개인 거래(파티 미소속 데이터) 전부 삭제
 export const deletePersonalTransactions = async (): Promise<void> => {
+  const mode = await getAuthMode();
+  if (mode === 'guest') {
+    await saveLocalTransactions([]);
+    return;
+  }
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) return;

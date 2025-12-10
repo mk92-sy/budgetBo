@@ -1,5 +1,6 @@
 import { supabase } from '@/lib/supabase';
 import { Party, PartyMember, UserParty } from '@/types/party';
+import { getAuthMode } from './authMode';
 
 // UUID 생성 함수
 const generateUUID = (): string => {
@@ -54,6 +55,10 @@ export const generateInviteCode = (): string => {
 // 파티 생성
 export const createParty = async (name: string): Promise<Party> => {
   try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      throw new Error('게스트 모드에서는 파티 기능을 사용할 수 없습니다.');
+    }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       throw new Error('No user session found');
@@ -115,6 +120,10 @@ export const createParty = async (name: string): Promise<Party> => {
 // 파티 가져오기 (현재 사용자가 속한 파티)
 export const getParty = async (): Promise<Party | null> => {
   try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      return null;
+    }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       return null;
@@ -153,6 +162,10 @@ export const getParty = async (): Promise<Party | null> => {
 // 사용자 파티 정보 가져오기
 export const getUserParty = async (): Promise<UserParty | null> => {
   try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      return null;
+    }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       return null;
@@ -182,62 +195,120 @@ export const getUserParty = async (): Promise<UserParty | null> => {
 // 초대코드로 파티 참가
 export const joinPartyByCode = async (inviteCode: string): Promise<Party | null> => {
   try {
-    const { data: { session } } = await supabase.auth.getSession();
+    console.log('=== joinPartyByCode START ===');
+    const mode = await getAuthMode();
+    console.log('Auth mode:', mode);
+    
+    if (mode === 'guest') {
+      throw new Error('게스트 모드에서는 파티 기능을 사용할 수 없습니다.');
+    }
+    
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    console.log('Session:', session?.user?.id, 'Error:', sessionError);
+    
     if (!session?.user) {
-      throw new Error('No user session found');
+      throw new Error('세션이 없습니다. 다시 로그인해주세요.');
     }
 
-  const displayName =
-    (session.user.user_metadata as any)?.name ||
-    (session.user.user_metadata as any)?.full_name ||
-    '사용자';
+    const displayName =
+      (session.user.user_metadata as any)?.name ||
+      (session.user.user_metadata as any)?.full_name ||
+      session.user.user_metadata?.nickname ||
+      '사용자';
+
+    const normalizedCode = inviteCode.trim().toUpperCase();
+    console.log('Normalized invite code:', normalizedCode);
+    console.log('Current user ID:', session.user.id);
+    console.log('Display name:', displayName);
 
     // 초대코드로 파티 찾기
-    const { data: partyData, error: partyError } = await supabase
+    console.log('Querying parties table...');
+    const { data: partyData, error: partyError, status: partyStatus } = await supabase
       .from('parties')
       .select('*')
-      .eq('invite_code', inviteCode.toUpperCase())
+      .eq('invite_code', normalizedCode)
       .maybeSingle();
 
-    if (partyError || !partyData) {
-      return null;
+    console.log('Party query result:', { partyData, partyError, status: partyStatus });
+
+    if (partyError) {
+      console.error('Error finding party by invite code:', partyError);
+      throw new Error(`파티 조회 실패 (${partyStatus}): ${partyError.message}`);
     }
 
+    if (!partyData) {
+      console.error('Party not found with invite code:', normalizedCode);
+      throw new Error('유효하지 않은 초대코드입니다.');
+    }
+
+    console.log('Party found:', partyData.id);
+
     // 이미 멤버인지 확인
-    const { data: existingMember } = await supabase
+    console.log('Checking if user is already member...');
+    const { data: existingMember, error: checkError } = await supabase
       .from('party_members')
       .select('*')
       .eq('party_id', partyData.id)
       .eq('user_id', session.user.id)
       .maybeSingle();
 
-    // 멤버가 아니면 추가
-    if (!existingMember) {
-      const { error: memberError } = await supabase
-        .from('party_members')
-        .insert({
-          party_id: partyData.id,
-          user_id: session.user.id,
-          role: 'member',
-          display_name: displayName,
-        });
+    console.log('Membership check:', { existingMember, checkError });
 
-      if (memberError) {
-        console.error('Error joining party:', memberError);
-        return null;
-      }
+    // 이미 멤버면 에러 발생
+    if (existingMember) {
+      console.log('User is already a member of this party');
+      throw new Error('이미 이 파티의 멤버입니다.');
     }
 
-    return await mapSupabaseToParty(partyData);
-  } catch (e) {
-    console.error('Error joining party:', e);
-    return null;
+    // 멤버 추가
+    console.log('Adding user as member to party...');
+    const insertPayload = {
+      party_id: partyData.id,
+      user_id: session.user.id,
+      role: 'member' as const,
+      display_name: displayName,
+    };
+    console.log('Insert payload:', insertPayload);
+
+    const { data: insertedMember, error: memberError, status: insertStatus } = await supabase
+      .from('party_members')
+      .insert([insertPayload])
+      .select();
+
+    console.log('Member insert result:', { insertedMember, memberError, status: insertStatus });
+
+    if (memberError) {
+      console.error('Error joining party (insert failed):', memberError);
+      throw new Error(`파티 가입 실패 (${insertStatus}): ${memberError.message}`);
+    }
+
+    if (!insertedMember || insertedMember.length === 0) {
+      console.error('No member inserted despite no error');
+      throw new Error('파티 멤버 추가에 실패했습니다.');
+    }
+
+    console.log('Successfully joined party:', insertedMember);
+
+    const party = await mapSupabaseToParty(partyData);
+    if (!party) {
+      throw new Error('파티 정보를 불러오는 중 오류가 발생했습니다.');
+    }
+
+    console.log('=== joinPartyByCode SUCCESS ===');
+    return party;
+  } catch (e: any) {
+    console.error('=== joinPartyByCode ERROR ===', e);
+    throw e;
   }
 };
 
 // 파티 나가기
 export const leaveParty = async (): Promise<void> => {
   try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      return;
+    }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       throw new Error('No user session found');
@@ -261,6 +332,10 @@ export const leaveParty = async (): Promise<void> => {
 // 파티 삭제 (호스트만)
 export const deleteParty = async (): Promise<void> => {
   try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      throw new Error('게스트 모드에서는 파티 기능을 사용할 수 없습니다.');
+    }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       throw new Error('No user session found');
@@ -290,6 +365,10 @@ export const deleteParty = async (): Promise<void> => {
 // 파티원 강퇴 (호스트만 가능, RLS에서 검증)
 export const removePartyMember = async (partyId: string, targetUserId: string): Promise<void> => {
   try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      throw new Error('게스트 모드에서는 파티 기능을 사용할 수 없습니다.');
+    }
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       throw new Error('No user session found');

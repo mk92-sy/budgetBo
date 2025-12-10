@@ -1,34 +1,158 @@
-import { Session } from "@supabase/supabase-js";
+import { AuthError, Session } from "@supabase/supabase-js";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
+import { AuthMode, clearAuthMode, getAuthMode, setAuthMode } from "../utils/authMode";
+
+type AuthState = {
+  session: Session | null;
+  mode: AuthMode | null;
+  loading: boolean;
+};
+
+function getAuthErrorMessage(error: AuthError): string {
+  const message = error.message || "";
+  
+  // 이메일 확인 필요
+  if (message.includes("Email not confirmed")) {
+    return "📧 이메일 인증이 완료되지 않았습니다.\n\n이메일 받은편지함을 확인하여 인증 링크를 클릭해주세요.\n\n(스팸 폴더도 확인해주세요)";
+  }
+  
+  // 잘못된 로그인 정보
+  if (message.includes("Invalid login credentials")) {
+    return "❌ 이메일 또는 비밀번호가 잘못되었습니다.\n\n입력하신 정보를 다시 확인해주세요.";
+  }
+  
+  // 이미 가입된 이메일
+  if (message.includes("User already registered")) {
+    return "⚠️ 이미 가입된 이메일입니다.\n\n로그인 탭에서 로그인해주세요.";
+  }
+  
+  // 약한 비밀번호
+  if (message.includes("weak password")) {
+    return "🔒 비밀번호가 너무 간단합니다.\n\n더 강한 비밀번호를 사용해주세요.\n(최소 6자 이상, 대소문자, 숫자 포함 권장)";
+  }
+  
+  // 잘못된 이메일 형식
+  if (message.includes("invalid email")) {
+    return "✉️ 올바른 이메일 형식이 아닙니다.\n\n예: user@example.com";
+  }
+  
+  // 네트워크 오류
+  if (message.includes("Network error")) {
+    return "🌐 네트워크 연결을 확인해주세요.";
+  }
+  
+  // 기타 오류
+  return message || "❌ 인증 중 오류가 발생했습니다.";
+}
 
 export function useAuth() {
   const router = useRouter();
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [state, setState] = useState<AuthState>({
+    session: null,
+    mode: null,
+    loading: true,
+  });
 
   useEffect(() => {
-    // 현재 세션 가져오기
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setLoading(false);
-    });
+    let mounted = true;
 
-    // 세션 변경 감지
+    const init = async () => {
+      const storedMode = await getAuthMode();
+
+      if (storedMode === "guest") {
+        if (!mounted) return;
+        setState({ session: null, mode: "guest", loading: false });
+        return;
+      }
+
+      const { data } = await supabase.auth.getSession();
+      if (!mounted) return;
+      setState({ session: data.session, mode: data.session ? "supabase" : null, loading: false });
+    };
+
+    init();
+
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+      setState((prev) => ({
+        ...prev,
+        session,
+        mode: session ? "supabase" : prev.mode === "guest" ? "guest" : null,
+      }));
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const signOut = async () => {
+  const signUp = async (email: string, password: string, nickname: string) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { name: nickname, nickname } },
+    });
+    if (error) {
+      throw new Error(getAuthErrorMessage(error));
+    }
+    await setAuthMode("supabase");
+    setState({ session: data.session, mode: "supabase", loading: false });
+    return data.session;
+  };
+
+  const signIn = async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) {
+      throw new Error(getAuthErrorMessage(error));
+    }
+    await setAuthMode("supabase");
+    setState({ session: data.session, mode: "supabase", loading: false });
+    // 로그인 성공 후 즉시 화면 전환
+    router.replace("/(tabs)");
+    return data.session;
+  };
+
+  const continueAsGuest = async () => {
+    await setAuthMode("guest");
     await supabase.auth.signOut();
+    setState({ session: null, mode: "guest", loading: false });
+    // 게스트 모드 진입 후 즉시 화면 전환
+    router.replace("/(tabs)");
+  };
+
+  const signOut = async () => {
+    if (state.mode === "guest") {
+      await clearAuthMode();
+      setState({ session: null, mode: null, loading: false });
+      router.replace("/login");
+      return;
+    }
+    await supabase.auth.signOut();
+    await clearAuthMode();
+    setState({ session: null, mode: null, loading: false });
     router.replace("/login");
   };
 
-  return { session, loading, signOut };
+  const userName =
+    state.mode === "guest"
+      ? "게스트"
+      : state.session?.user?.user_metadata?.nickname ||
+        state.session?.user?.user_metadata?.name ||
+        state.session?.user?.email ||
+        "사용자";
+
+  return {
+    session: state.session,
+    loading: state.loading,
+    isGuest: state.mode === "guest",
+    userName,
+    signUp,
+    signIn,
+    continueAsGuest,
+    signOut,
+  };
 }

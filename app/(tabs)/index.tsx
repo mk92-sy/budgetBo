@@ -1,3 +1,4 @@
+import { CustomDropdown } from "@/components/CustomDropdown";
 import { useModal } from "@/contexts/ModalContext";
 import { useAuth } from "@/hooks/useAuth";
 import { Transaction, TransactionType } from "@/types/transaction";
@@ -10,7 +11,6 @@ import {
   loadTransactions,
   updateTransaction,
 } from "@/utils/storage";
-import { Picker } from "@react-native-picker/picker";
 import { useFocusEffect } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
@@ -23,6 +23,7 @@ import {
   View,
 } from "react-native";
 import { Calendar, LocaleConfig } from "react-native-calendars";
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // 달력 한글화
 LocaleConfig.locales.ko = {
@@ -70,6 +71,7 @@ LocaleConfig.defaultLocale = "ko";
 
 export default function HomeScreen() {
   const { isModalOpen, openModal, closeModal } = useModal();
+  const insets = useSafeAreaInsets();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>(getToday());
   const [selectedYear, setSelectedYear] = useState(
@@ -314,58 +316,38 @@ export default function HomeScreen() {
   const totals = getTotalForDate(selectedDate);
   const monthTotals = getMonthlyTotals(selectedDate);
   const cumulativeBalance = getCumulativeBalance(selectedDate);
-  const { session, signOut } = useAuth();
+  const { session, signOut, isGuest, userName } = useAuth();
   return (
-    <View className="flex-1 bg-white">
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#fff', paddingTop: 0}}>
       <View className="pt-4 pb-4 px-4 bg-blue-500">
         <View className="flex-row justify-between items-center mb-3">
           <View className="flex-1">
             <View className="flex-row items-center">
-              <View className="border border-white/30 rounded-lg overflow-hidden mr-2">
-                <Picker
-                  selectedValue={selectedYear}
-                  onValueChange={handleYearChange}
-                  style={{
-                    color: "white",
-                    width: 100,
-                    height: 40,
-                    backgroundColor: "transparent",
-                  }}
-                  dropdownIconColor="white"
-                >
-                  {getYearOptions().map((year) => (
-                    <Picker.Item key={year} label={`${year}년`} value={year} />
-                  ))}
-                </Picker>
-              </View>
+              <CustomDropdown
+                items={getYearOptions().map(String)}
+                selectedValue={String(selectedYear)}
+                onValueChange={(val) => handleYearChange(Number(val))}
+                label="년"
+                containerStyle={{ marginRight: 8, minWidth: 120 }}
+                textColor="white"
+                borderColor="white/30"
+              />
 
-              <View className="border border-white/30 rounded-lg overflow-hidden">
-                <Picker
-                  selectedValue={selectedMonth}
-                  onValueChange={handleMonthChange}
-                  style={{
-                    color: "white",
-                    width: 90,
-                    height: 40,
-                    backgroundColor: "transparent",
-                  }}
-                  dropdownIconColor="white"
-                >
-                  {monthOptions.map((month) => (
-                    <Picker.Item
-                      key={month}
-                      label={`${month}월`}
-                      value={month}
-                    />
-                  ))}
-                </Picker>
-              </View>
+              <CustomDropdown
+                items={monthOptions.map(String)}
+                selectedValue={String(selectedMonth)}
+                onValueChange={(val) => handleMonthChange(Number(val))}
+                label="월"
+                containerStyle={{ minWidth: 110 }}
+                textColor="white"
+                borderColor="white/30"
+              />
 
               <Text className="text-white text-xl font-bold ml-2">가계부</Text>
             </View>
             <View className="flex-row justify-between items-center">
               <Text className="text-white/80 text-sm mt-1">
-                {session?.user?.user_metadata?.name}님 안녕하세요!
+                {userName}님 안녕하세요!
               </Text>
               <Text
                 className="text-white/80 text-sm mt-1"
@@ -816,6 +798,6 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }

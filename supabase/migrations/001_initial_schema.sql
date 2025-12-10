@@ -128,15 +128,42 @@ DROP POLICY IF EXISTS "Users can view own memberships" ON party_members;
 DROP POLICY IF EXISTS "Hosts can remove members" ON party_members;
 DROP POLICY IF EXISTS "Members can view same party memberships" ON party_members;
 
+-- RLS 무한 재귀를 방지하기 위한 security definer 함수
+-- 이 함수는 RLS를 우회하여 party_members 테이블을 직접 조회할 수 있습니다
+-- SECURITY DEFINER로 인해 함수 소유자(postgres) 권한으로 실행되므로 RLS를 우회합니다
+CREATE OR REPLACE FUNCTION is_user_party_member(check_party_id UUID, check_user_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM party_members
+    WHERE party_id = check_party_id
+    AND user_id = check_user_id
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public;
+
+-- 호스트 권한 확인을 위한 security definer 함수
+CREATE OR REPLACE FUNCTION is_user_party_host(check_party_id UUID, check_user_id UUID)
+RETURNS BOOLEAN AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM party_members
+    WHERE party_id = check_party_id
+    AND user_id = check_user_id
+    AND role = 'host'
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public;
+
 -- Transactions 정책: 개인 데이터 또는 같은 파티 데이터 접근 허용
 CREATE POLICY "Party members can view transactions"
   ON transactions FOR SELECT
   TO authenticated
   USING (
     user_id = auth.uid()
-    OR party_id IN (
-      SELECT party_id FROM party_members WHERE user_id = auth.uid()
-    )
+    OR (party_id IS NOT NULL AND is_user_party_member(party_id, auth.uid()))
   );
 
 CREATE POLICY "Party members can insert transactions"
@@ -146,9 +173,7 @@ CREATE POLICY "Party members can insert transactions"
     user_id = auth.uid()
     AND (
       party_id IS NULL
-      OR party_id IN (
-        SELECT party_id FROM party_members WHERE user_id = auth.uid()
-      )
+      OR is_user_party_member(party_id, auth.uid())
     )
   );
 
@@ -157,17 +182,13 @@ CREATE POLICY "Party members can update transactions"
   TO authenticated
   USING (
     user_id = auth.uid()
-    OR party_id IN (
-      SELECT party_id FROM party_members WHERE user_id = auth.uid()
-    )
+    OR (party_id IS NOT NULL AND is_user_party_member(party_id, auth.uid()))
   )
   WITH CHECK (
     user_id = auth.uid()
     AND (
       party_id IS NULL
-      OR party_id IN (
-        SELECT party_id FROM party_members WHERE user_id = auth.uid()
-      )
+      OR is_user_party_member(party_id, auth.uid())
     )
   );
 
@@ -176,9 +197,7 @@ CREATE POLICY "Party members can delete transactions"
   TO authenticated
   USING (
     user_id = auth.uid()
-    OR party_id IN (
-      SELECT party_id FROM party_members WHERE user_id = auth.uid()
-    )
+    OR (party_id IS NOT NULL AND is_user_party_member(party_id, auth.uid()))
   );
 
 -- Categories 정책: 개인 데이터 또는 같은 파티 데이터 접근 허용
@@ -187,9 +206,7 @@ CREATE POLICY "Party members can view categories"
   TO authenticated
   USING (
     user_id = auth.uid()
-    OR party_id IN (
-      SELECT party_id FROM party_members WHERE user_id = auth.uid()
-    )
+    OR (party_id IS NOT NULL AND is_user_party_member(party_id, auth.uid()))
   );
 
 CREATE POLICY "Party members can insert categories"
@@ -199,9 +216,7 @@ CREATE POLICY "Party members can insert categories"
     user_id = auth.uid()
     AND (
       party_id IS NULL
-      OR party_id IN (
-        SELECT party_id FROM party_members WHERE user_id = auth.uid()
-      )
+      OR is_user_party_member(party_id, auth.uid())
     )
   );
 
@@ -210,17 +225,13 @@ CREATE POLICY "Party members can update categories"
   TO authenticated
   USING (
     user_id = auth.uid()
-    OR party_id IN (
-      SELECT party_id FROM party_members WHERE user_id = auth.uid()
-    )
+    OR (party_id IS NOT NULL AND is_user_party_member(party_id, auth.uid()))
   )
   WITH CHECK (
     user_id = auth.uid()
     AND (
       party_id IS NULL
-      OR party_id IN (
-        SELECT party_id FROM party_members WHERE user_id = auth.uid()
-      )
+      OR is_user_party_member(party_id, auth.uid())
     )
   );
 
@@ -229,9 +240,7 @@ CREATE POLICY "Party members can delete categories"
   TO authenticated
   USING (
     user_id = auth.uid()
-    OR party_id IN (
-      SELECT party_id FROM party_members WHERE user_id = auth.uid()
-    )
+    OR (party_id IS NOT NULL AND is_user_party_member(party_id, auth.uid()))
   );
 
 -- Parties 정책: 파티 멤버는 파티 정보를 조회할 수 있음
@@ -239,11 +248,7 @@ CREATE POLICY "Party members can delete categories"
 CREATE POLICY "Party members can view parties"
   ON parties FOR SELECT
   USING (
-    EXISTS (
-      SELECT 1 FROM party_members pm
-      WHERE pm.party_id = parties.id
-      AND pm.user_id = auth.uid()
-    )
+    is_user_party_member(parties.id, auth.uid())
   );
 
 -- 인증된 사용자는 파티 생성 가능 (created_by = auth.uid() 확보)
@@ -261,23 +266,13 @@ CREATE POLICY "Authenticated can view parties"
 CREATE POLICY "Party hosts can update parties"
   ON parties FOR UPDATE
   USING (
-    EXISTS (
-      SELECT 1 FROM party_members
-      WHERE party_members.party_id = parties.id
-      AND party_members.user_id = auth.uid()
-      AND party_members.role = 'host'
-    )
+    is_user_party_host(parties.id, auth.uid())
   );
 
 CREATE POLICY "Party hosts can delete parties"
   ON parties FOR DELETE
   USING (
-    EXISTS (
-      SELECT 1 FROM party_members
-      WHERE party_members.party_id = parties.id
-      AND party_members.user_id = auth.uid()
-      AND party_members.role = 'host'
-    )
+    is_user_party_host(parties.id, auth.uid())
   );
 
 -- Party Members 정책 (조회: 파티 멤버면 ok, 삭제: 호스트는 다른 멤버 강퇴 가능)
@@ -287,13 +282,12 @@ CREATE POLICY "Users can view own memberships"
   USING (user_id = auth.uid());
 
 -- 같은 파티 멤버 조회 허용 (파티 멤버 리스트용)
+-- security definer 함수를 사용하여 무한 재귀 방지
 CREATE POLICY "Members can view same party memberships"
   ON party_members FOR SELECT
   TO authenticated
   USING (
-    party_id IN (
-      SELECT party_id FROM party_members WHERE user_id = auth.uid()
-    )
+    is_user_party_member(party_id, auth.uid())
   );
 
 CREATE POLICY "Users can join parties"
@@ -310,12 +304,7 @@ CREATE POLICY "Hosts can remove members"
   ON party_members FOR DELETE
   TO authenticated
   USING (
-    EXISTS (
-      SELECT 1 FROM party_members pm
-      WHERE pm.party_id = party_members.party_id
-      AND pm.user_id = auth.uid()
-      AND pm.role = 'host'
-    )
+    is_user_party_host(party_members.party_id, auth.uid())
   );
 
 -- updated_at 자동 업데이트 함수
