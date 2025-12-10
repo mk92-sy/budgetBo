@@ -9,7 +9,6 @@ import { Alert, Button, ScrollView, Text, View } from "react-native";
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
-  // Deep link 리스너 추가
   useEffect(() => {
     const handleDeepLink = async (event: Linking.EventType) => {
       const url = event.url;
@@ -27,8 +26,7 @@ export default function LoginScreen() {
               refresh_token,
             });
             
-            // 로그인 성공 후 페이지 이동
-            router.replace('/(tabs)'); // 또는 원하는 경로
+            router.replace('/(tabs)');
           } catch (error) {
             console.error('Session error:', error);
             Alert.alert('로그인 실패', '세션 설정 중 오류가 발생했습니다.');
@@ -39,7 +37,6 @@ export default function LoginScreen() {
 
     const subscription = Linking.addEventListener('url', handleDeepLink);
 
-    // 앱이 닫혀있다가 deep link로 열린 경우
     Linking.getInitialURL().then((url) => {
       if (url) {
         handleDeepLink({ url });
@@ -53,62 +50,40 @@ export default function LoginScreen() {
 
   async function signInWithGoogle() {
     try {
+      // 🔥 수정 1: redirectUrl 생성 방식 변경
       const redirectUrl = makeRedirectUri({
-        scheme: "budgetbook", // 소문자로 변경 (일관성)
-        path: "auth/callback" // path 추가
+        scheme: "budgetbook",
+        // path 제거 또는 간단하게
       });
 
-      console.log('Redirect URL:', redirectUrl); // 디버깅용
+      console.log('Redirect URL:', redirectUrl);
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: redirectUrl,
-          skipBrowserRedirect: true,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          }
+          // 🔥 수정 2: skipBrowserRedirect 제거 (false로 설정)
+          // skipBrowserRedirect: true, // 이 줄 제거
         },
       });
 
       if (error) throw error;
 
       if (data.url) {
-        // 브라우저 세션 열기
+        // 🔥 수정 3: WebBrowser.openAuthSessionAsync 사용
         const result = await WebBrowser.openAuthSessionAsync(
           data.url,
           redirectUrl
         );
 
-        console.log('Browser result:', result); // 디버깅용
+        console.log('Browser result:', result);
 
-        // result.type이 'success'인 경우 처리
         if (result.type === "success" && result.url) {
-          const hashPart = result.url.split("#")[1];
-          
-          if (hashPart) {
-            const params = new URLSearchParams(hashPart);
-            const access_token = params.get("access_token");
-            const refresh_token = params.get("refresh_token");
-
-            if (access_token && refresh_token) {
-              await supabase.auth.setSession({
-                access_token,
-                refresh_token,
-              });
-              
-              // 로그인 성공 후 페이지 이동
-              router.replace('/(tabs)'); // 또는 원하는 경로
-              Alert.alert('로그인 성공!');
-            } else {
-              Alert.alert('로그인 실패', '토큰을 가져올 수 없습니다.');
-            }
-          }
+          // Deep link 리스너가 자동으로 처리하므로
+          // 여기서는 추가 처리 불필요
+          // handleDeepLink가 자동으로 호출됨
         } else if (result.type === "cancel") {
           Alert.alert('로그인 취소', '로그인이 취소되었습니다.');
-        } else if (result.type === "dismiss") {
-          console.log('Browser dismissed');
         }
       }
     } catch (error: any) {
