@@ -3,24 +3,25 @@ import { Category } from '@/types/category';
 import { Party, UserParty } from '@/types/party';
 import { TransactionType } from '@/types/transaction';
 import { addCategory, deleteCategory, deletePersonalCategories, loadCategories, updateCategory } from '@/utils/category';
-import { createParty, deleteParty, getParty, getUserParty, joinPartyByCode, leaveParty, removePartyMember } from '@/utils/party';
+import { createParty, deleteParty, getParty, getUserParty, joinPartyByCode, leaveParty, removePartyMember, updateParty } from '@/utils/party';
 import { deletePersonalTransactions } from '@/utils/storage';
 import * as Clipboard from 'expo-clipboard';
 import { useEffect, useState } from 'react';
-import { Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type ConfirmDialogType = 'joinParty' | 'leaveParty' | 'deleteParty' | 'removeMember' | null;
 type TabType = 'category' | 'party';
 
 export default function SettingsScreen() {
-  const { isGuest } = useAuth();
+  const { isGuest, signOut, userName } = useAuth();
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<TabType>('category');
   const [party, setParty] = useState<Party | null>(null);
   const [userParty, setUserParty] = useState<UserParty | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [inviteCodeModalVisible, setInviteCodeModalVisible] = useState(false);
+  const [editPartyModalVisible, setEditPartyModalVisible] = useState(false);
   const [joinCodeModalVisible, setJoinCodeModalVisible] = useState(false);
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -70,6 +71,29 @@ export default function SettingsScreen() {
     setPartyNameInput('');
     setInviteCodeModalVisible(false);
     Alert.alert('성공', '파티가 생성되었습니다!');
+  };
+
+  const openEditPartyModal = () => {
+    if (!party) return;
+    setPartyNameInput(party.name);
+    setEditPartyModalVisible(true);
+  };
+
+  const handleUpdatePartyName = async () => {
+    if (!party) return;
+    if (!partyNameInput.trim()) {
+      Alert.alert('오류', '파티 이름을 입력해주세요.');
+      return;
+    }
+    try {
+      const updated = await updateParty(party.id, partyNameInput.trim());
+      setParty(updated);
+      setEditPartyModalVisible(false);
+      setPartyNameInput('');
+      Alert.alert('완료', '파티 이름이 변경되었습니다.');
+    } catch (error: any) {
+      Alert.alert('오류', error?.message || '파티 이름 변경 중 오류가 발생했습니다.');
+    }
   };
 
   const handleJoinPartyConfirm = async () => {
@@ -248,7 +272,12 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
       <View className="pt-4 pb-4 px-4 bg-blue-500">
-        <Text className="text-2xl font-bold text-white">설정</Text>
+        <View className="flex-row items-center justify-between">
+          <Text className="text-2xl font-bold text-white">설정</Text>
+          <TouchableOpacity onPress={signOut} className="px-3 py-1">
+            <Text className="text-white font-semibold">로그아웃</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* 탭 메뉴 - 알약 형태, 왼쪽 정렬, 가로 스크롤 지원 */}
@@ -429,20 +458,29 @@ export default function SettingsScreen() {
                 </View>
 
                 <View className="flex-row gap-2 mt-4">
-                  {userParty?.role === 'host' && (
+                  {userParty?.role === 'host' ? (
+                    <>
+                      <TouchableOpacity
+                        onPress={handleDeleteParty}
+                        className="flex-1 bg-red-500 py-2 rounded"
+                      >
+                        <Text className="text-white text-center font-semibold">파티 삭제</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={openEditPartyModal}
+                        className="flex-1 bg-gray-500 py-2 rounded"
+                      >
+                        <Text className="text-white text-center font-semibold">파티 이름 변경</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
                     <TouchableOpacity
-                      onPress={handleDeleteParty}
-                      className="flex-1 bg-red-500 py-2 rounded"
+                      onPress={handleLeaveParty}
+                      className="flex-1 bg-gray-500 py-2 rounded"
                     >
-                      <Text className="text-white text-center font-semibold">파티 삭제</Text>
+                      <Text className="text-white text-center font-semibold">파티 나가기</Text>
                     </TouchableOpacity>
                   )}
-                  <TouchableOpacity
-                    onPress={handleLeaveParty}
-                    className="flex-1 bg-gray-500 py-2 rounded"
-                  >
-                    <Text className="text-white text-center font-semibold">파티 나가기</Text>
-                  </TouchableOpacity>
                 </View>
               </View>
             ) : (
@@ -452,6 +490,7 @@ export default function SettingsScreen() {
                     if (isGuest) {
                       Alert.alert('로그인 필요', '파티 기능은 로그인 후 사용 가능합니다.');
                     } else {
+                      setPartyNameInput(`${userName}님의 공유가계부`);
                       setInviteCodeModalVisible(true);
                     }
                   }}
@@ -484,25 +523,63 @@ export default function SettingsScreen() {
         transparent={true}
         onRequestClose={() => setInviteCodeModalVisible(false)}
       >
-        <View className="flex-1 bg-black/50 justify-end">
-          <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: (insets.bottom ?? 16) }}>
-            <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-xl font-bold">새 파티 만들기</Text>
-              <TouchableOpacity onPress={() => setInviteCodeModalVisible(false)}>
-                <Text className="text-gray-500 text-lg">✕</Text>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <View className="flex-1 bg-black/50 justify-end">
+            <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
+              <View className="flex-row justify-between items-center mb-4">
+                <Text className="text-xl font-bold">새 파티 만들기</Text>
+                <TouchableOpacity onPress={() => setInviteCodeModalVisible(false)}>
+                  <Text className="text-gray-500 text-lg">✕</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                value={partyNameInput}
+                onChangeText={setPartyNameInput}
+                placeholder="파티 이름을 입력하세요"
+                className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
+              />
+              <TouchableOpacity onPress={handleCreateParty} className="bg-blue-500 py-4 rounded-lg">
+                <Text className="text-white text-center font-bold text-lg">생성</Text>
               </TouchableOpacity>
             </View>
-            <TextInput
-              value={partyNameInput}
-              onChangeText={setPartyNameInput}
-              placeholder="파티 이름을 입력하세요"
-              className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-            />
-            <TouchableOpacity onPress={handleCreateParty} className="bg-blue-500 py-4 rounded-lg">
-              <Text className="text-white text-center font-bold text-lg">생성</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* 파티 이름 변경 모달 */}
+      <Modal
+        visible={editPartyModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setEditPartyModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <View className="flex-1 bg-black/50 justify-end">
+            <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
+              <View className="flex-row justify-between items-center mb-4">
+                <Text className="text-xl font-bold">파티 이름 변경</Text>
+                <TouchableOpacity onPress={() => setEditPartyModalVisible(false)}>
+                  <Text className="text-gray-500 text-lg">✕</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                value={partyNameInput}
+                onChangeText={setPartyNameInput}
+                placeholder="파티 이름을 입력하세요"
+                className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
+              />
+              <TouchableOpacity onPress={handleUpdatePartyName} className="bg-blue-500 py-4 rounded-lg">
+                <Text className="text-white text-center font-bold text-lg">변경</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* 초대코드 입력 모달 */}
@@ -512,32 +589,37 @@ export default function SettingsScreen() {
         transparent={true}
         onRequestClose={() => setJoinCodeModalVisible(false)}
       >
-        <View className="flex-1 bg-black/50 justify-end">
-          <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: (insets.bottom ?? 16) }}>
-            <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-xl font-bold">초대코드 입력</Text>
-              <TouchableOpacity onPress={() => setJoinCodeModalVisible(false)}>
-                <Text className="text-gray-500 text-lg">✕</Text>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <View className="flex-1 bg-black/50 justify-end">
+            <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
+              <View className="flex-row justify-between items-center mb-4">
+                <Text className="text-xl font-bold">초대코드 입력</Text>
+                <TouchableOpacity onPress={() => setJoinCodeModalVisible(false)}>
+                  <Text className="text-gray-500 text-lg">✕</Text>
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                value={inviteCodeInput}
+                onChangeText={setInviteCodeInput}
+                placeholder="초대코드를 입력하세요"
+                className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
+                autoCapitalize="characters"
+              />
+              <TouchableOpacity 
+                onPress={handleJoinParty} 
+                className={`py-4 rounded-lg ${isJoining ? 'bg-gray-400' : 'bg-green-500'}`}
+                disabled={isJoining}
+              >
+                <Text className="text-white text-center font-bold text-lg">
+                  {isJoining ? '처리 중...' : '참가'}
+                </Text>
               </TouchableOpacity>
             </View>
-            <TextInput
-              value={inviteCodeInput}
-              onChangeText={setInviteCodeInput}
-              placeholder="초대코드를 입력하세요"
-              className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
-              autoCapitalize="characters"
-            />
-            <TouchableOpacity 
-              onPress={handleJoinParty} 
-              className={`py-4 rounded-lg ${isJoining ? 'bg-gray-400' : 'bg-green-500'}`}
-              disabled={isJoining}
-            >
-              <Text className="text-white text-center font-bold text-lg">
-                {isJoining ? '처리 중...' : '참가'}
-              </Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* 카테고리 추가/수정 모달 */}
@@ -551,69 +633,74 @@ export default function SettingsScreen() {
           setCategoryForm({ type: 'expense', name: '' });
         }}
       >
-        <View className="flex-1 bg-black/50 justify-end">
-          <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: (insets.bottom ?? 16) }}>
-            <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-xl font-bold">
-                {editingCategory ? '카테고리 수정' : '카테고리 추가'}
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  setCategoryModalVisible(false);
-                  setEditingCategory(null);
-                  setCategoryForm({ type: 'expense', name: '' });
-                }}
-              >
-                <Text className="text-gray-500 text-lg">✕</Text>
-              </TouchableOpacity>
-            </View>
-            <View className="mb-4">
-              <Text className="text-gray-700 mb-2 font-medium">유형</Text>
-              <View className="flex-row gap-2">
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+        >
+          <View className="flex-1 bg-black/50 justify-end">
+            <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
+              <View className="flex-row justify-between items-center mb-4">
+                <Text className="text-xl font-bold">
+                  {editingCategory ? '카테고리 수정' : '카테고리 추가'}
+                </Text>
                 <TouchableOpacity
-                  onPress={() => setCategoryForm({ ...categoryForm, type: 'income' })}
-                  className={`flex-1 py-3 rounded-lg ${
-                    categoryForm.type === 'income' ? 'bg-green-500' : 'bg-gray-200'
-                  }`}
+                  onPress={() => {
+                    setCategoryModalVisible(false);
+                    setEditingCategory(null);
+                    setCategoryForm({ type: 'expense', name: '' });
+                  }}
                 >
-                  <Text
-                    className={`text-center font-semibold ${
-                      categoryForm.type === 'income' ? 'text-white' : 'text-gray-700'
-                    }`}
-                  >
-                    수입
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={() => setCategoryForm({ ...categoryForm, type: 'expense' })}
-                  className={`flex-1 py-3 rounded-lg ${
-                    categoryForm.type === 'expense' ? 'bg-red-500' : 'bg-gray-200'
-                  }`}
-                >
-                  <Text
-                    className={`text-center font-semibold ${
-                      categoryForm.type === 'expense' ? 'text-white' : 'text-gray-700'
-                    }`}
-                  >
-                    지출
-                  </Text>
+                  <Text className="text-gray-500 text-lg">✕</Text>
                 </TouchableOpacity>
               </View>
+              <View className="mb-4">
+                <Text className="text-gray-700 mb-2 font-medium">유형</Text>
+                <View className="flex-row gap-2">
+                  <TouchableOpacity
+                    onPress={() => setCategoryForm({ ...categoryForm, type: 'income' })}
+                    className={`flex-1 py-3 rounded-lg ${
+                      categoryForm.type === 'income' ? 'bg-green-500' : 'bg-gray-200'
+                    }`}
+                  >
+                    <Text
+                      className={`text-center font-semibold ${
+                        categoryForm.type === 'income' ? 'text-white' : 'text-gray-700'
+                      }`}
+                    >
+                      수입
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setCategoryForm({ ...categoryForm, type: 'expense' })}
+                    className={`flex-1 py-3 rounded-lg ${
+                      categoryForm.type === 'expense' ? 'bg-red-500' : 'bg-gray-200'
+                    }`}
+                  >
+                    <Text
+                      className={`text-center font-semibold ${
+                        categoryForm.type === 'expense' ? 'text-white' : 'text-gray-700'
+                      }`}
+                    >
+                      지출
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+              <View className="mb-4">
+                <Text className="text-gray-700 mb-2 font-medium">카테고리 이름</Text>
+                <TextInput
+                  value={categoryForm.name}
+                  onChangeText={(text) => setCategoryForm({ ...categoryForm, name: text })}
+                  placeholder="카테고리 이름을 입력하세요"
+                  className="border border-gray-300 rounded-lg px-4 py-3"
+                />
+              </View>
+              <TouchableOpacity onPress={handleSaveCategory} className="bg-blue-500 py-4 rounded-lg">
+                <Text className="text-white text-center font-bold text-lg">저장</Text>
+              </TouchableOpacity>
             </View>
-            <View className="mb-4">
-              <Text className="text-gray-700 mb-2 font-medium">카테고리 이름</Text>
-              <TextInput
-                value={categoryForm.name}
-                onChangeText={(text) => setCategoryForm({ ...categoryForm, name: text })}
-                placeholder="카테고리 이름을 입력하세요"
-                className="border border-gray-300 rounded-lg px-4 py-3"
-              />
-            </View>
-            <TouchableOpacity onPress={handleSaveCategory} className="bg-blue-500 py-4 rounded-lg">
-              <Text className="text-white text-center font-bold text-lg">저장</Text>
-            </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* 확인 모달 */}

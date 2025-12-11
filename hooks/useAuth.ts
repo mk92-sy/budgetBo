@@ -1,8 +1,10 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthError, Session } from "@supabase/supabase-js";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { AuthMode, clearAuthMode, getAuthMode, setAuthMode } from "../utils/authMode";
+import { createDefaultCategoriesForUser } from "../utils/category";
 
 type AuthState = {
   session: Session | null;
@@ -70,6 +72,17 @@ export function useAuth() {
       const { data } = await supabase.auth.getSession();
       if (!mounted) return;
       setState({ session: data.session, mode: data.session ? "supabase" : null, loading: false });
+
+      // If user previously chose 'remember me' and there is a valid session,
+      // navigate straight to the main tabs (auto-login UX).
+      try {
+        const rm = await AsyncStorage.getItem('bb_remember_me');
+        if (rm === 'true' && data.session) {
+          router.replace('/(tabs)');
+        }
+      } catch (e) {
+        // ignore storage errors
+      }
     };
 
     init();
@@ -101,6 +114,13 @@ export function useAuth() {
     }
     await setAuthMode("supabase");
     setState({ session: data.session, mode: "supabase", loading: false });
+    // Try to create default categories for the new user.
+    try {
+      const userId = (data as any)?.user?.id || data.session?.user?.id;
+      await createDefaultCategoriesForUser(userId);
+    } catch (e) {
+      console.error('Failed to create default categories on signup:', e);
+    }
     return data.session;
   };
 
@@ -111,6 +131,13 @@ export function useAuth() {
     }
     await setAuthMode("supabase");
     setState({ session: data.session, mode: "supabase", loading: false });
+    // Ensure default categories exist on user sign-in (covers email-confirm flows)
+    try {
+      const uid = data.session?.user?.id;
+      if (uid) await createDefaultCategoriesForUser(uid);
+    } catch (e) {
+      console.error('Failed to create default categories on sign-in:', e);
+    }
     // 로그인 성공 후 즉시 화면 전환
     router.replace("/(tabs)");
     return data.session;

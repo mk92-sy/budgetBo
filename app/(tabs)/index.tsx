@@ -6,21 +6,23 @@ import { getCategoriesByType } from "@/utils/category";
 import { getToday } from "@/utils/date";
 import { getParty, getUserParty } from "@/utils/party";
 import {
-  addTransaction,
-  deleteTransaction,
-  loadTransactions,
-  updateTransaction,
+    addTransaction,
+    deleteTransaction,
+    loadTransactions,
+    updateTransaction,
 } from "@/utils/storage";
 import { useFocusEffect } from "expo-router";
 import React, { useEffect, useState } from "react";
 import {
-  Alert,
-  Modal,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { Calendar, LocaleConfig } from "react-native-calendars";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -322,7 +324,28 @@ export default function HomeScreen() {
       <View className="pt-4 pb-4 px-4 bg-blue-500">
         <View className="flex-row justify-between items-center mb-3">
           <View className="flex-1">
-            <View className="flex-row items-center">
+            {/* Title row above selects */}
+            <View>
+              {party?.id ? (
+                <View className="flex-row items-center">
+                  <Text className="text-white text-xl font-bold mr-2">{party.name}</Text>
+                  <View
+                    className={`px-2 py-1 rounded ${
+                      party.userRole === "host" ? "bg-blue-600" : "bg-gray-600"
+                    }`}
+                  >
+                    <Text className="text-white text-xs font-semibold">
+                      {party.userRole === "host" ? "파티장" : "파티원"}
+                    </Text>
+                  </View>
+                </View>
+              ) : (
+                <Text className="text-white text-xl font-bold">내 가계부</Text>
+              )}
+            </View>
+
+            {/* Select boxes row (below title) */}
+            <View className="flex-row items-center mt-2">
               <CustomDropdown
                 items={getYearOptions().map(String)}
                 selectedValue={String(selectedYear)}
@@ -343,35 +366,8 @@ export default function HomeScreen() {
                 borderColor="white/30"
               />
 
-              <Text className="text-white text-xl font-bold ml-2">가계부</Text>
             </View>
-            <View className="flex-row justify-between items-center">
-              <Text className="text-white/80 text-sm mt-1">
-                {userName}님 안녕하세요!
-              </Text>
-              <Text
-                className="text-white/80 text-sm mt-1"
-                role="button"
-                onPress={signOut}
-              >
-                로그아웃
-              </Text>
-            </View>
-            {party?.id && (
-              <Text className="text-white/80 text-sm mt-1">{party.name}</Text>
-            )}
           </View>
-          {party?.id && (
-            <View
-              className={`px-2 py-1 rounded ${
-                party.userRole === "host" ? "bg-blue-600" : "bg-gray-600"
-              }`}
-            >
-              <Text className="text-white text-xs font-semibold">
-                {party.userRole === "host" ? "파티장" : "파티원"}
-              </Text>
-            </View>
-          )}
         </View>
         <View className="bg-white/10 rounded-lg p-3">
           <View className="flex-row justify-between">
@@ -650,23 +646,34 @@ export default function HomeScreen() {
           resetForm();
         }}
       >
-        <View className="flex-1 bg-black/50 justify-end">
-          <View className="bg-white rounded-t-3xl p-6 max-h-[90%]">
-            <View className="flex-row justify-between items-center mb-4">
-              <Text className="text-xl font-bold">
-                {editingTransaction ? "거래 수정" : "거래 추가"}
-              </Text>
-              <TouchableOpacity
-                onPress={() => {
-                  closeModal();
-                  resetForm();
-                }}
-              >
-                <Text className="text-gray-500 text-lg">✕</Text>
-              </TouchableOpacity>
-            </View>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={{ flex: 1 }}
+          keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
+        >
+          <View className="flex-1 bg-black/50 justify-end">
+            <View
+              className="bg-white rounded-t-3xl p-6"
+              style={{
+                maxHeight: "90%",
+                paddingBottom: Math.max(insets.bottom, 24),
+              }}
+            >
+              <View className="flex-row justify-between items-center mb-4">
+                <Text className="text-xl font-bold">
+                  {editingTransaction ? "거래 수정" : "거래 추가"}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => {
+                    closeModal();
+                    resetForm();
+                  }}
+                >
+                  <Text className="text-gray-500 text-lg">✕</Text>
+                </TouchableOpacity>
+              </View>
 
-            <ScrollView>
+              <ScrollView keyboardShouldPersistTaps="handled">
               <View className="mb-4">
                 <Text className="text-gray-700 mb-2 font-medium">유형</Text>
                 <View className="flex-row gap-2">
@@ -795,8 +802,9 @@ export default function HomeScreen() {
                 </Text>
               </TouchableOpacity>
             </ScrollView>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );

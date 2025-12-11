@@ -233,3 +233,54 @@ export const deletePersonalCategories = async (): Promise<void> => {
   }
 };
 
+// 신규 회원용 기본 카테고리 생성
+export const createDefaultCategoriesForUser = async (userId?: string): Promise<void> => {
+  try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') return;
+
+    let uid = userId;
+    if (!uid) {
+      const { data: { session } } = await supabase.auth.getSession();
+      uid = session?.user?.id;
+    }
+    if (!uid) return;
+    const defaults = [
+      { type: 'income', name: '월급' },
+      { type: 'income', name: '기타' },
+      { type: 'expense', name: '식비' },
+      { type: 'expense', name: '생필품' },
+      { type: 'expense', name: '공과금' },
+      { type: 'expense', name: '월세' },
+      { type: 'expense', name: '기타' },
+    ];
+
+    // Load existing personal categories for user
+    const { data: existingData, error: fetchErr } = await supabase
+      .from('categories')
+      .select('type,name')
+      .eq('user_id', uid)
+      .is('party_id', null);
+
+    if (fetchErr) {
+      console.error('Error fetching existing categories:', fetchErr);
+      return;
+    }
+
+    const existingSet = new Set<string>((existingData || []).map((r: any) => `${r.type}::${r.name}`));
+
+    const toInsert = defaults
+      .filter((d) => !existingSet.has(`${d.type}::${d.name}`))
+      .map((d) => ({ id: generateUUID(), user_id: uid, party_id: null, type: d.type, name: d.name }));
+
+    if (toInsert.length === 0) return;
+
+    const { error } = await supabase.from('categories').insert(toInsert);
+    if (error) {
+      console.error('Error creating default categories:', error);
+    }
+  } catch (e) {
+    console.error('Error in createDefaultCategoriesForUser:', e);
+  }
+};
+

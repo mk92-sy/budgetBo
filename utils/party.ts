@@ -388,3 +388,36 @@ export const removePartyMember = async (partyId: string, targetUserId: string): 
   }
 };
 
+// 파티 이름 변경 (호스트 전용 권한으로 RLS가 설정되어 있음)
+export const updateParty = async (partyId: string, newName: string): Promise<Party> => {
+  try {
+    const mode = await getAuthMode();
+    if (mode === 'guest') {
+      throw new Error('게스트 모드에서는 파티 기능을 사용할 수 없습니다.');
+    }
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      throw new Error('No user session found');
+    }
+
+    const { data, error } = await supabase
+      .from('parties')
+      .update({ name: newName })
+      .eq('id', partyId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating party name:', error);
+      throw error;
+    }
+
+    const party = await mapSupabaseToParty(data);
+    if (!party) throw new Error('Failed to map updated party');
+    return party;
+  } catch (e) {
+    console.error('Error in updateParty:', e);
+    throw e;
+  }
+};
+

@@ -1,14 +1,16 @@
 import { useAuth } from "@/hooks/useAuth";
-import { useState } from "react";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as NavigationBar from 'expo-navigation-bar';
+import { useEffect, useState } from "react";
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -16,38 +18,91 @@ export default function LoginScreen() {
   const { signIn, signUp, continueAsGuest } = useAuth();
   const insets = useSafeAreaInsets();
   const [mode, setMode] = useState<"login" | "signup">("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [nickname, setNickname] = useState("");
+
+  // Separate state for login and signup so inputs don't share values
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
+
+  const [signupEmail, setSignupEmail] = useState("");
+  const [signupPassword, setSignupPassword] = useState("");
+  const [signupPasswordConfirm, setSignupPasswordConfirm] = useState("");
+  const [signupNickname, setSignupNickname] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    const loadRemember = async () => {
+      try {
+        const rm = await AsyncStorage.getItem('bb_remember_me');
+        const em = await AsyncStorage.getItem('bb_remember_email');
+        if (rm === 'true') {
+          setRememberMe(true);
+          if (em) setLoginEmail(em);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    loadRemember();
+
+    // Ensure Android navigation bar matches app background to avoid visible black area
+    (async () => {
+      try {
+        await NavigationBar.setBackgroundColorAsync('#ffffff');
+        await NavigationBar.setButtonStyleAsync('dark');
+      } catch (e) {
+        // ignore if unavailable
+      }
+    })();
+  }, []);
+
   const handleSubmit = async () => {
-    if (
-      !email.trim() ||
-      !password.trim() ||
-      (mode === "signup" && !nickname.trim())
-    ) {
-      setErrorMessage("이메일, 비밀번호, 닉네임을 모두 입력해주세요.");
-      Alert.alert("입력 필요", "이메일, 비밀번호, 닉네임을 모두 입력해주세요.");
-      return;
+    if (mode === "login") {
+      if (!loginEmail.trim() || !loginPassword.trim()) {
+        setErrorMessage("이메일과 비밀번호를 입력해주세요.");
+        Alert.alert("입력 필요", "이메일과 비밀번호를 입력해주세요.");
+        return;
+      }
+    } else {
+      if (!signupEmail.trim() || !signupPassword.trim() || !signupNickname.trim() || !signupPasswordConfirm.trim()) {
+        setErrorMessage("이메일, 비밀번호, 비밀번호 확인, 닉네임을 모두 입력해주세요.");
+        Alert.alert("입력 필요", "이메일, 비밀번호, 비밀번호 확인, 닉네임을 모두 입력해주세요.");
+        return;
+      }
+
+      if (signupPassword !== signupPasswordConfirm) {
+        setErrorMessage("비밀번호가 일치하지 않습니다.");
+        Alert.alert("비밀번호 불일치", "비밀번호와 비밀번호 확인이 일치하지 않습니다.");
+        return;
+      }
     }
 
     try {
       setErrorMessage(null);
       setLoading(true);
       if (mode === "login") {
-        await signIn(email.trim(), password.trim());
+        await signIn(loginEmail.trim(), loginPassword.trim());
+        // persist remember-me flag (no credentials are stored)
+        if (rememberMe) {
+          await AsyncStorage.setItem('bb_remember_me', 'true');
+          await AsyncStorage.setItem('bb_remember_email', loginEmail.trim());
+        } else {
+          await AsyncStorage.removeItem('bb_remember_me');
+          await AsyncStorage.removeItem('bb_remember_email');
+        }
       } else {
-        await signUp(email.trim(), password.trim(), nickname.trim());
+        await signUp(signupEmail.trim(), signupPassword.trim(), signupNickname.trim());
         Alert.alert(
           "✅ 회원가입 완료!",
-          "입력하신 이메일로 인증 메일이 발송되었습니다.\n\n메일함을 확인하여 인증 링크를 클릭한 후 위에서 로그인해주세요.\n\n💡 팁: 스팸 폴더도 확인해주세요!"
+          "회원가입이 완료되었습니다. 로그인하여 시작하세요."
         );
         setMode("login");
-        setEmail("");
-        setPassword("");
-        setNickname("");
+        // clear signup inputs
+        setSignupEmail("");
+        setSignupPassword("");
+        setSignupPasswordConfirm("");
+        setSignupNickname("");
       }
     } catch (error: any) {
       const errorMsg =
@@ -66,11 +121,12 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1 }}
+      style={{ flex: 1, backgroundColor: '#fff' }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={insets.top + 10}
     >
       <ScrollView
+        style={{ flex: 1, backgroundColor: '#fff' }}
         className="flex-1 bg-white"
         contentContainerStyle={{
           flexGrow: 1,
@@ -124,8 +180,8 @@ export default function LoginScreen() {
             <View>
               <Text className="text-gray-700 mb-1">이메일</Text>
               <TextInput
-                value={email}
-                onChangeText={setEmail}
+                value={mode === 'login' ? loginEmail : signupEmail}
+                onChangeText={mode === 'login' ? setLoginEmail : setSignupEmail}
                 placeholder="you@example.com"
                 keyboardType="email-address"
                 autoCapitalize="none"
@@ -137,8 +193,8 @@ export default function LoginScreen() {
               <View>
                 <Text className="text-gray-700 mb-1">닉네임</Text>
                 <TextInput
-                  value={nickname}
-                  onChangeText={setNickname}
+                  value={signupNickname}
+                  onChangeText={setSignupNickname}
                   placeholder="별명을 입력하세요"
                   className="border border-gray-300 rounded-lg px-4 py-3"
                 />
@@ -148,13 +204,40 @@ export default function LoginScreen() {
             <View>
               <Text className="text-gray-700 mb-1">비밀번호</Text>
               <TextInput
-                value={password}
-                onChangeText={setPassword}
+                value={mode === 'login' ? loginPassword : signupPassword}
+                onChangeText={mode === 'login' ? setLoginPassword : setSignupPassword}
                 placeholder="비밀번호를 입력하세요"
                 secureTextEntry
                 className="border border-gray-300 rounded-lg px-4 py-3"
               />
             </View>
+
+            {mode === 'signup' && (
+              <View>
+                <Text className="text-gray-700 mb-1">비밀번호 확인</Text>
+                <TextInput
+                  value={signupPasswordConfirm}
+                  onChangeText={setSignupPasswordConfirm}
+                  placeholder="비밀번호를 다시 입력하세요"
+                  secureTextEntry
+                  className="border border-gray-300 rounded-lg px-4 py-3"
+                />
+              </View>
+            )}
+
+            {mode === 'login' && (
+              <TouchableOpacity
+                onPress={() => setRememberMe(!rememberMe)}
+                className="flex-row items-center mt-1"
+              >
+                <View className={`w-5 h-5 mr-2 rounded-sm border ${rememberMe ? 'bg-blue-500 border-blue-500' : 'border-gray-400'}`}>
+                  {rememberMe && (
+                    <Text className="text-white text-xs text-center">✓</Text>
+                  )}
+                </View>
+                <Text className="text-gray-700">자동로그인</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {errorMessage && (

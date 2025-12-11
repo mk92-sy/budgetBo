@@ -157,18 +157,24 @@ export const updateTransaction = async (id: string, updatedTransaction: Transact
 
     const userParty = await getUserParty();
 
-    const { error } = await supabase
-      .from('transactions')
-      .update({
-        date: updatedTransaction.date,
-        type: updatedTransaction.type,
-        category: updatedTransaction.category,
-        amount: updatedTransaction.amount,
-        description: updatedTransaction.description,
-        party_id: userParty?.partyId || null,
-      })
-      .eq('id', id)
-      .eq('user_id', session.user.id);
+    const query = supabase.from('transactions').update({
+      date: updatedTransaction.date,
+      type: updatedTransaction.type,
+      category: updatedTransaction.category,
+      amount: updatedTransaction.amount,
+      description: updatedTransaction.description,
+      party_id: userParty?.partyId || null,
+    }).eq('id', id);
+
+    // If user is in a party, allow updating transactions that belong to that party
+    if (userParty) {
+      query.eq('party_id', userParty.partyId);
+    } else {
+      // Personal transactions require ownership
+      query.eq('user_id', session.user.id);
+    }
+
+    const { error } = await query;
 
     if (error) {
       console.error('Error updating transaction:', error);
@@ -195,11 +201,17 @@ export const deleteTransaction = async (id: string): Promise<void> => {
       throw new Error('No user session found');
     }
 
-    const { error } = await supabase
-      .from('transactions')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', session.user.id);
+    const query = supabase.from('transactions').delete().eq('id', id);
+
+    // If user is in a party, allow deleting transactions that belong to that party
+    if (userParty) {
+      query.eq('party_id', userParty.partyId);
+    } else {
+      // Personal transactions require ownership
+      query.eq('user_id', session.user.id);
+    }
+
+    const { error } = await query;
 
     if (error) {
       console.error('Error deleting transaction:', error);
