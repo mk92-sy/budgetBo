@@ -3,9 +3,10 @@ import StatsCharts from '@/components/StatsCharts';
 import { useAuth } from '@/hooks/useAuth';
 import { Transaction } from '@/types/transaction';
 import { loadTransactions } from '@/utils/storage';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useFocusEffect } from 'expo-router';
 
 export default function StatsScreen() {
   const insets = useSafeAreaInsets();
@@ -23,6 +24,12 @@ export default function StatsScreen() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [])
+  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>

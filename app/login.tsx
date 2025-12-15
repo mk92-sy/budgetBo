@@ -3,14 +3,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as NavigationBar from 'expo-navigation-bar';
 import { useEffect, useState } from "react";
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -183,21 +183,23 @@ export default function LoginScreen() {
                 value={mode === 'login' ? loginEmail : signupEmail}
                 onChangeText={mode === 'login' ? setLoginEmail : setSignupEmail}
                 placeholder="you@example.com"
+                placeholderTextColor="#9CA3AF"
                 keyboardType="email-address"
                 autoCapitalize="none"
-                className="border border-gray-300 rounded-lg px-4 py-3"
+                className="border border-gray-300 rounded-lg px-4 py-3 text-gray-900"
               />
             </View>
 
             {mode === "signup" && (
               <View>
                 <Text className="text-gray-700 mb-1">닉네임</Text>
-                <TextInput
-                  value={signupNickname}
-                  onChangeText={setSignupNickname}
-                  placeholder="별명을 입력하세요"
-                  className="border border-gray-300 rounded-lg px-4 py-3"
-                />
+              <TextInput
+                value={signupNickname}
+                onChangeText={setSignupNickname}
+                placeholder="별명을 입력하세요"
+                placeholderTextColor="#9CA3AF"
+                className="border border-gray-300 rounded-lg px-4 py-3 text-gray-900"
+              />
               </View>
             )}
 
@@ -207,8 +209,9 @@ export default function LoginScreen() {
                 value={mode === 'login' ? loginPassword : signupPassword}
                 onChangeText={mode === 'login' ? setLoginPassword : setSignupPassword}
                 placeholder="비밀번호를 입력하세요"
+                placeholderTextColor="#9CA3AF"
                 secureTextEntry
-                className="border border-gray-300 rounded-lg px-4 py-3"
+                className="border border-gray-300 rounded-lg px-4 py-3 text-gray-900"
               />
             </View>
 
@@ -219,8 +222,9 @@ export default function LoginScreen() {
                   value={signupPasswordConfirm}
                   onChangeText={setSignupPasswordConfirm}
                   placeholder="비밀번호를 다시 입력하세요"
+                  placeholderTextColor="#9CA3AF"
                   secureTextEntry
-                  className="border border-gray-300 rounded-lg px-4 py-3"
+                  className="border border-gray-300 rounded-lg px-4 py-3 text-gray-900"
                 />
               </View>
             )}

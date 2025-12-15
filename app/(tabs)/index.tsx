@@ -884,6 +884,7 @@ export default function HomeScreen() {
               style={{
                 maxHeight: "90%",
                 paddingBottom: Math.max(insets.bottom, 24),
+                marginBottom: Math.max(insets.bottom, 12),
               }}
             >
               <View className="flex-row justify-between items-center mb-4">
