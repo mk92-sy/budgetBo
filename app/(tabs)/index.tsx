@@ -2,6 +2,7 @@ import { CustomDropdown } from "@/components/CustomDropdown";
 import { useModal } from "@/contexts/ModalContext";
 import { useAuth } from "@/hooks/useAuth";
 import { Transaction, TransactionFormData } from "@/types/transaction";
+import { onPartyUpdate } from '@/utils/appEvents';
 import { getCategoriesByType } from '@/utils/category';
 import { getToday } from "@/utils/date";
 import {
@@ -26,6 +27,7 @@ import {
 } from "react-native";
 import { Calendar, LocaleConfig } from "react-native-calendars";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
 
 // 달력 한글화
 LocaleConfig.locales.ko = {
@@ -185,9 +187,17 @@ export default function HomeScreen() {
       // ignore
     }
   };
-
   useEffect(() => {
     loadPartyInfo();
+
+    // subscribe to global party updates
+    const unsubscribe = onPartyUpdate(() => {
+      loadPartyInfo();
+    });
+
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
   }, []);
 
               
@@ -450,7 +460,11 @@ export default function HomeScreen() {
                     }}
                     activeOpacity={0.8}
                   >
-                    <Text style={{ color: viewMode === 'calendar' ? '#1f2937' : '#fff', fontWeight: '600' }}>캘린더</Text>
+                    <Ionicons
+                      name="calendar-outline"
+                      size={18}
+                      color={viewMode === 'calendar' ? '#000' : '#fff'}
+                    />
                   </TouchableOpacity>
                   <TouchableOpacity
                     onPress={() => setViewMode('list')}
@@ -463,7 +477,11 @@ export default function HomeScreen() {
                     }}
                     activeOpacity={0.8}
                   >
-                    <Text style={{ color: viewMode === 'list' ? '#1f2937' : '#fff', fontWeight: '600' }}>리스트</Text>
+                    <Ionicons
+                      name="list-outline"
+                      size={18}
+                      color={viewMode === 'list' ? '#000' : '#fff'}
+                    />
                   </TouchableOpacity>
                 </View>
               </View>
@@ -497,7 +515,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      <ScrollView className="flex-1">
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 80 }}>
         <View className="p-4">
           {viewMode === 'calendar' ? (
             <>
@@ -805,10 +823,10 @@ export default function HomeScreen() {
                     </View>
                     <View className="flex-row gap-2">
                       <TouchableOpacity onPress={() => handleEdit(transaction)} className="bg-blue-500 px-3 py-2 rounded">
-                        <Text className="text-white text-xs">수정</Text>
+                        <Ionicons name="pencil-outline" size={16} color="#fff" />
                       </TouchableOpacity>
                       <TouchableOpacity onPress={() => handleDelete(transaction.id)} className="bg-red-500 px-3 py-2 rounded">
-                        <Text className="text-white text-xs">삭제</Text>
+                        <Ionicons name="trash-outline" size={16} color="#fff" />
                       </TouchableOpacity>
                     </View>
                   </View>

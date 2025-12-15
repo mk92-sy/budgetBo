@@ -26,13 +26,58 @@ const mapSupabaseToParty = async (row: any): Promise<Party | null> => {
       return null;
     }
 
-    const members: PartyMember[] = (membersData || []).map((m: any) => ({
-      userId: m.user_id,
-      role: m.role,
-      joinedAt: new Date(m.joined_at).getTime(),
-      // display_name은 없을 수 있으니 fallback
-      displayName: m.display_name || undefined,
-    }));
+    // Get current session user and metadata (used as authoritative for self)
+    let currentUserId: string | null = null;
+    let currentUserMeta: any = {};
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      currentUserId = session?.user?.id ?? null;
+      currentUserMeta = session?.user?.user_metadata ?? {};
+      // Try to refresh from auth.getUser for freshest metadata (nickname changes)
+      const { data: authUser } = await supabase.auth.getUser();
+      const freshMeta = authUser?.user?.user_metadata;
+      if (freshMeta) currentUserMeta = freshMeta;
+    } catch {
+      currentUserId = null;
+      currentUserMeta = {};
+    }
+
+    // Fetch latest user metadata for members to keep display names in sync with profile nickname (may be limited by RLS)
+    let userMetaById = new Map<string, any>();
+    try {
+      const memberIds = (membersData || []).map((m: any) => m.user_id);
+      if (memberIds.length > 0) {
+        const { data: usersData, error: usersError } = await supabase
+          .from('users')
+          .select('id, user_metadata')
+          .in('id', memberIds);
+        if (!usersError && usersData) {
+          userMetaById = new Map(usersData.map((u: any) => [u.id, u.user_metadata]));
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load user metadata for party members', e);
+    }
+
+    const members: PartyMember[] = (membersData || []).map((m: any) => {
+      const meta = userMetaById.get(m.user_id) || {};
+      const metaName = meta.nickname || meta.name || meta.full_name;
+
+      // If this is the current user, override with latest auth metadata
+      const isCurrentUser = currentUserId && m.user_id === currentUserId;
+      const selfName = isCurrentUser
+        ? (currentUserMeta?.nickname || currentUserMeta?.name || currentUserMeta?.full_name)
+        : undefined;
+
+      // Prefer latest metadata (self meta first, then users table meta), then stored display_name
+      const displayName = selfName || metaName || m.display_name || undefined;
+      return {
+        userId: m.user_id,
+        role: m.role,
+        joinedAt: new Date(m.joined_at).getTime(),
+        displayName,
+      };
+    });
 
     return {
       id: row.id,
@@ -66,10 +111,10 @@ export const createParty = async (name: string): Promise<Party> => {
 
     const inviteCode = generateInviteCode();
     const partyId = generateUUID();
-    const displayName =
-      (session.user.user_metadata as any)?.name ||
-      (session.user.user_metadata as any)?.full_name ||
-      '사용자';
+    // Prefer explicit nickname from latest user metadata, then name/full_name, then fallback
+    const { data: userData } = await supabase.auth.getUser();
+    const userMeta = (userData?.user?.user_metadata as any) || (session.user.user_metadata as any) || {};
+    const displayName = userMeta.nickname || userMeta.name || userMeta.full_name || '사용자';
 
     // 파티 생성
     const { data: partyData, error: partyError } = await supabase
@@ -210,11 +255,10 @@ export const joinPartyByCode = async (inviteCode: string): Promise<Party | null>
       throw new Error('세션이 없습니다. 다시 로그인해주세요.');
     }
 
-    const displayName =
-      (session.user.user_metadata as any)?.name ||
-      (session.user.user_metadata as any)?.full_name ||
-      session.user.user_metadata?.nickname ||
-      '사용자';
+    // Prefer nickname first (users often set nickname), then name/full_name
+    const { data: userData } = await supabase.auth.getUser();
+    const userMeta = (userData?.user?.user_metadata as any) || (session.user.user_metadata as any) || {};
+    const displayName = userMeta.nickname || userMeta.name || userMeta.full_name || '사용자';
 
     const normalizedCode = inviteCode.trim().toUpperCase();
     console.log('Normalized invite code:', normalizedCode);

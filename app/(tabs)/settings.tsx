@@ -1,17 +1,21 @@
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/lib/supabase';
 import { Category } from '@/types/category';
 import { Party, UserParty } from '@/types/party';
 import { TransactionType } from '@/types/transaction';
+import { emitPartyUpdate } from '@/utils/appEvents';
 import { addCategory, deleteCategory, deletePersonalCategories, loadCategories, updateCategory } from '@/utils/category';
 import { createParty, deleteParty, getParty, getUserParty, joinPartyByCode, leaveParty, removePartyMember, updateParty } from '@/utils/party';
 import { deletePersonalTransactions } from '@/utils/storage';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Clipboard from 'expo-clipboard';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+
 type ConfirmDialogType = 'joinParty' | 'leaveParty' | 'deleteParty' | 'removeMember' | null;
-type TabType = 'category' | 'party';
+type TabType = 'category' | 'party' | 'profile';
 
 export default function SettingsScreen() {
   const { isGuest, signOut, userName } = useAuth();
@@ -35,11 +39,124 @@ export default function SettingsScreen() {
     name: '',
   });
 
+  // Profile (닉네임)
+  const [nicknameInput, setNicknameInput] = useState('');
+  const [displayedNickname, setDisplayedNickname] = useState('');
+  const [email, setEmail] = useState<string | null>(null);
+  const [nicknameModalVisible, setNicknameModalVisible] = useState(false);
+
+  const syncPartyMemberNicknames = useCallback(async (options: { persist?: boolean } = {}) => {
+    const { persist = false } = options;
+    try {
+      if (!party?.members || party.members.length === 0) return;
+      const memberIds = party.members.map((m) => m.userId);
+      // Try to fetch latest metadata from users table (may be restricted by RLS)
+      const { data: usersData, error } = await supabase
+        .from('users')
+        .select('id, user_metadata')
+        .in('id', memberIds);
+      if (error || !usersData) return;
+
+      const metaById = new Map<string, any>();
+      usersData.forEach((u: any) => metaById.set(u.id, u.user_metadata));
+
+      const updatedMembers = party.members.map((m) => {
+        const meta = metaById.get(m.userId) || {};
+        const latest = meta?.nickname || meta?.name || meta?.full_name;
+        if (latest && latest !== m.displayName) {
+          return { ...m, displayName: latest };
+        }
+        return m;
+      });
+
+      // If there were changes, update local party state so UI reflects latest names
+      const changed = updatedMembers.some((um, idx) => um.displayName !== party.members[idx].displayName);
+      if (changed) {
+        setParty({ ...(party as any), members: updatedMembers });
+
+        // If requested, try to persist the updated display names back to party_members (best-effort)
+        if (persist && party?.id) {
+          let anyPersisted = false;
+          for (const updated of updatedMembers) {
+            const original = party.members.find((m) => m.userId === updated.userId);
+            if (!original) continue;
+            if (original.displayName === updated.displayName) continue;
+            try {
+              const { error: memberError } = await supabase
+                .from('party_members')
+                .update({ display_name: updated.displayName })
+                .eq('user_id', updated.userId)
+                .eq('party_id', party.id);
+              if (memberError) {
+                console.warn('Failed to persist party member display_name', memberError);
+              } else {
+                anyPersisted = true;
+              }
+            } catch {
+              console.warn('Failed to persist party member display_name');
+            }
+          }
+
+          // If any persistence succeeded, reload from the server to ensure canonical state
+          if (anyPersisted) {
+            try {
+              await loadData();
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // ignore errors (RLS or other permission issues may prevent reads)
+      console.warn('Failed to sync party member nicknames', e);
+    }
+  }, [party]);
+
   // 최대 카테고리 수 (수입/지출 각각)
   const MAX_CATEGORIES_PER_TYPE = 20;
 
   useEffect(() => {
-    loadData();
+    (async () => {
+      try {
+        const { data } = await supabase.auth.getUser();
+        const nick = (data?.user?.user_metadata as any)?.nickname || '';
+        const em = data?.user?.email || '';
+        setDisplayedNickname(nick);
+        setEmail(em);
+      } catch {
+        // ignore
+      }
+    })();
+  }, []);
+
+  // Ensure nickname input shows the user's current nickname when opening the profile tab
+  // remove auto-syncing nicknameInput; we'll populate nicknameInput only when opening the edit modal
+
+  // When the active tab switches to 'party', attempt to sync member nicknames for display
+  useEffect(() => {
+    if (activeTab === 'party') {
+      // Ensure we have up-to-date party data before syncing display names
+      (async () => {
+        try {
+          await loadData();
+          await syncPartyMemberNicknames();
+        } catch {
+          // ignore
+        }
+      })();
+    }
+  }, [activeTab, syncPartyMemberNicknames]);
+
+  // initial load of data
+  useEffect(() => {
+    (async () => {
+      try {
+        await loadData();
+      } catch {
+        // ignore
+      }
+    })();
   }, []);
 
   const loadData = async () => {
@@ -51,16 +168,19 @@ export default function SettingsScreen() {
     setCategories(categoriesData);
   };
 
-  const handleCreateParty = async () => {
-    if (isGuest) {
-      Alert.alert('로그인 필요', '파티 기능은 로그인 후 사용 가능합니다.');
-      return;
+  // Open Party tab: always refresh and sync nicknames (even if tab is already active)
+  const openPartyTab = async () => {
+    setActiveTab('party');
+    try {
+      await loadData();
+      // Attempt to sync display names and persist them to party_members if possible
+      await syncPartyMemberNicknames({ persist: true });
+    } catch {
+      // ignore
     }
-    if (!partyNameInput.trim()) {
-      Alert.alert('오류', '파티 이름을 입력해주세요.');
-      return;
-    }
+  };
 
+  const handleCreateParty = async () => {
     const newParty = await createParty(partyNameInput.trim());
     setParty(newParty);
     setUserParty({
@@ -91,6 +211,8 @@ export default function SettingsScreen() {
       setEditPartyModalVisible(false);
       setPartyNameInput('');
       Alert.alert('완료', '파티 이름이 변경되었습니다.');
+      // notify app that party changed
+      try { emitPartyUpdate(); } catch {}
     } catch (error: any) {
       Alert.alert('오류', error?.message || '파티 이름 변경 중 오류가 발생했습니다.');
     }
@@ -266,6 +388,77 @@ export default function SettingsScreen() {
     setCategoryModalVisible(true);
   };
 
+  // Profile: 닉네임 저장
+  const handleSaveNickname = async () => {
+    if (isGuest) {
+      Alert.alert('로그인 필요', '내 정보는 로그인 후에 변경 가능합니다.');
+      return;
+    }
+    if (!nicknameInput.trim()) {
+      Alert.alert('오류', '닉네임을 입력해주세요.');
+      return;
+    }
+    try {
+      const trimmedNickname = nicknameInput.trim();
+      const { error } = await supabase.auth.updateUser({ data: { nickname: trimmedNickname } as any });
+      if (error) throw error;
+      // refresh nickname from server to ensure consistency (fallback to trimmed value)
+      const { data } = await supabase.auth.getUser();
+      const nick = (data?.user?.user_metadata as any)?.nickname || trimmedNickname;
+      setDisplayedNickname(nick);
+      // Cache current user id once so we can reuse it below
+      let currentUserId: string | null = null;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        currentUserId = session?.user?.id ?? null;
+      } catch {
+        currentUserId = null;
+      }
+      // Optimistically update local party state so member list reflects the new nickname immediately
+      if (currentUserId && nick) {
+        setParty((prev) => {
+          if (!prev) return prev;
+          const updatedMembers = prev.members.map((member) =>
+            member.userId === currentUserId ? { ...member, displayName: nick } : member
+          );
+          const changed = updatedMembers.some((member, idx) => member.displayName !== prev.members[idx].displayName);
+          if (!changed) return prev;
+          return { ...prev, members: updatedMembers };
+        });
+      }
+      // Update party_members.display_name for ALL parties this user is a member of (best-effort)
+      try {
+        if (currentUserId) {
+          try {
+            const { error: memberError } = await supabase
+              .from('party_members')
+              .update({ display_name: nick })
+              .eq('user_id', currentUserId);
+            if (memberError) console.warn('Failed to update party member display_name', memberError);
+          } catch (err) {
+            console.warn('Failed to update party member display_name', err);
+          }
+        }
+      } catch {
+        console.warn('Failed to update party member display_name');
+      }
+
+      // refresh local party data and notify listeners
+      try {
+        await loadData();
+        await syncPartyMemberNicknames({ persist: true });
+      } catch {}
+      try { emitPartyUpdate(); } catch {}
+
+      Alert.alert('완료', '닉네임이 변경되었습니다.');
+    } catch (e: any) {
+      console.error('Failed to update nickname', e);
+      Alert.alert('오류', e?.message || '닉네임 변경 중 오류가 발생했습니다.');
+    }
+  };
+
+  
+
   const incomeCategories = categories.filter(c => c.type === 'income');
   const expenseCategories = categories.filter(c => c.type === 'expense');
 
@@ -298,18 +491,30 @@ export default function SettingsScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => setActiveTab('party')}
+              onPress={() => openPartyTab()}
               className={`px-6 py-2 rounded-full ${activeTab === 'party' ? 'bg-blue-500' : 'bg-gray-200'}`}
             >
               <Text className={`font-semibold text-sm ${activeTab === 'party' ? 'text-white' : 'text-gray-700'}`}>
                 파티 관리
               </Text>
             </TouchableOpacity>
+            
+
+            <TouchableOpacity
+              onPress={() => setActiveTab('profile')}
+              className={`px-6 py-2 rounded-full ${activeTab === 'profile' ? 'bg-blue-500' : 'bg-gray-200'}`}
+            >
+              <Text className={`font-semibold text-sm ${activeTab === 'profile' ? 'text-white' : 'text-gray-700'}`}>
+                내 정보 관리
+              </Text>
+            </TouchableOpacity>
+
+            
           </View>
         </ScrollView>
       </View>
 
-      <ScrollView className="flex-1">
+      <ScrollView className="flex-1" contentContainerStyle={{ paddingBottom: 80 }}>
         {/* 카테고리 관리 탭 */}
         {activeTab === 'category' && (
           <View className="p-4">
@@ -336,15 +541,15 @@ export default function SettingsScreen() {
                   <View className="flex-row gap-2">
                     <TouchableOpacity
                       onPress={() => handleEditCategory(category)}
-                      className="bg-blue-500 px-3 py-1 rounded"
+                      className="bg-blue-500 px-3 py-2 rounded"
                     >
-                      <Text className="text-white text-xs">수정</Text>
+                      <Ionicons name="pencil-outline" size={16} color="#fff" />
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => handleDeleteCategory(category)}
-                      className="bg-red-500 px-3 py-1 rounded"
+                      className="bg-red-500 px-3 py-2 rounded"
                     >
-                      <Text className="text-white text-xs">삭제</Text>
+                      <Ionicons name="trash-outline" size={16} color="#fff" />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -372,15 +577,15 @@ export default function SettingsScreen() {
                   <View className="flex-row gap-2">
                     <TouchableOpacity
                       onPress={() => handleEditCategory(category)}
-                      className="bg-blue-500 px-3 py-1 rounded"
+                      className="bg-blue-500 px-3 py-2 rounded"
                     >
-                      <Text className="text-white text-xs">수정</Text>
+                      <Ionicons name="pencil-outline" size={16} color="#fff" />
                     </TouchableOpacity>
                     <TouchableOpacity
                       onPress={() => handleDeleteCategory(category)}
-                      className="bg-red-500 px-3 py-1 rounded"
+                      className="bg-red-500 px-3 py-2 rounded"
                     >
-                      <Text className="text-white text-xs">삭제</Text>
+                      <Ionicons name="trash-outline" size={16} color="#fff" />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -514,6 +719,71 @@ export default function SettingsScreen() {
             )}
           </View>
         )}
+
+        {/* 프로필 탭 */}
+        {activeTab === 'profile' && (
+          <View className="p-4">
+            <Text className="text-lg font-semibold mb-3 text-gray-800">내 정보 관리</Text>
+
+            <View className="mb-4">
+              <Text className="text-gray-600 mb-2">이메일</Text>
+              <Text className="text-gray-800">{email || '—'}</Text>
+            </View>
+
+            <View className="mb-4">
+              <Text className="text-gray-600 mb-2">닉네임</Text>
+              <View className="flex-row items-center justify-between">
+                <Text className="text-gray-800">{displayedNickname || '—'}</Text>
+                <TouchableOpacity onPress={() => { setNicknameModalVisible(true); setNicknameInput(displayedNickname || ''); }} className="bg-gray-200 px-3 py-1 rounded">
+                  <Text className="text-sm">수정</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* 닉네임 수정 모달 */}
+            <Modal
+              visible={nicknameModalVisible}
+              animationType="slide"
+              transparent={true}
+              onRequestClose={() => setNicknameModalVisible(false)}
+            >
+              <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                style={{ flex: 1 }}
+              >
+                <View className="flex-1 bg-black/50 justify-end">
+                  <View className="bg-white rounded-t-3xl p-6" style={{ paddingBottom: Math.max(insets.bottom, 24) }}>
+                    <View className="flex-row justify-between items-center mb-4">
+                      <Text className="text-xl font-bold">닉네임 수정</Text>
+                      <TouchableOpacity onPress={() => setNicknameModalVisible(false)}>
+                        <Text className="text-gray-500 text-lg">✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <TextInput
+                      value={nicknameInput}
+                      onChangeText={setNicknameInput}
+                      placeholder="새 닉네임을 입력하세요"
+                      className="border border-gray-300 rounded-lg px-4 py-3 mb-4"
+                    />
+                    <TouchableOpacity
+                      onPress={async () => {
+                        await handleSaveNickname();
+                        setNicknameModalVisible(false);
+                      }}
+                      className="bg-blue-500 py-3 rounded-lg"
+                    >
+                      <Text className="text-white text-center font-semibold">저장</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </KeyboardAvoidingView>
+            </Modal>
+
+            {/* 이메일은 가입 시 입력한 값만 보여줍니다 (수정 불가) */}
+          </View>
+        )}
+
+        
       </ScrollView>
 
       {/* 파티 생성 모달 */}
