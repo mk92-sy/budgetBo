@@ -78,7 +78,26 @@ export function useAuth() {
       try {
         const rm = await AsyncStorage.getItem('bb_remember_me');
         if (rm === 'true' && data.session) {
-          router.replace('/(tabs)');
+          // Redirect to the main tabs only when we are currently on a public route
+          // (root, login, auth flows). If the user is already inside the app
+          // (e.g., /settings), do not force a navigation which causes an undesired
+          // re-render/redirect behavior.
+          // Derive current path in a safe way. Avoid treating "empty/undefined" as a public route
+          // because during some navigation flows pathname/asPath can be temporarily empty
+          // which caused an undesired redirect back to the main tabs when moving to
+          // internal routes such as settings. Be strict: only treat known public routes
+          // (root or auth/login flows) as public.
+          const currentPath = (router as any).pathname || (router as any).asPath || '';
+          const onPublicRoute =
+            currentPath === '/' ||
+            currentPath === '/index' ||
+            currentPath.startsWith('/login') ||
+            currentPath.startsWith('/auth') ||
+            currentPath.startsWith('/signup');
+
+          if (onPublicRoute) {
+            router.replace('/(tabs)');
+          }
         }
       } catch (e) {
         // ignore storage errors

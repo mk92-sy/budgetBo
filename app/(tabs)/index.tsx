@@ -1,28 +1,28 @@
 import { CustomDropdown } from "@/components/CustomDropdown";
 import { useModal } from "@/contexts/ModalContext";
 import { useAuth } from "@/hooks/useAuth";
-import { Transaction, TransactionType } from "@/types/transaction";
-import { getCategoriesByType } from "@/utils/category";
+import { Transaction, TransactionFormData } from "@/types/transaction";
+import { getCategoriesByType } from '@/utils/category';
 import { getToday } from "@/utils/date";
-import { getParty, getUserParty } from "@/utils/party";
 import {
-    addTransaction,
-    deleteTransaction,
-    loadTransactions,
-    updateTransaction,
+  addTransaction,
+  deleteTransaction,
+  loadTransactions,
+  updateTransaction,
 } from "@/utils/storage";
-import { useFocusEffect } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  Animated,
+  Dimensions,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { Calendar, LocaleConfig } from "react-native-calendars";
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -72,75 +72,171 @@ LocaleConfig.locales.ko = {
 LocaleConfig.defaultLocale = "ko";
 
 export default function HomeScreen() {
-  const { isModalOpen, openModal, closeModal } = useModal();
+  const { isModalOpen, closeModal } = useModal();
   const insets = useSafeAreaInsets();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>(getToday());
+  const selectedDateRef = useRef<string>(getToday());
+
+  const updateSelectedDate = (dateStr: string) => {
+    selectedDateRef.current = dateStr;
+    setSelectedDate(dateStr);
+  };
   const [selectedYear, setSelectedYear] = useState(
     new Date(selectedDate).getFullYear()
   );
   const [selectedMonth, setSelectedMonth] = useState(
     new Date(selectedDate).getMonth() + 1
   );
+  const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
   const [editingTransaction, setEditingTransaction] =
     useState<Transaction | null>(null);
-  const [categories, setCategories] = useState<{
-    income: string[];
-    expense: string[];
-  }>({
+
+  const [categories, setCategories] = useState<{ income: string[]; expense: string[] }>({
     income: [],
     expense: [],
   });
-  const [party, setParty] = useState<any>(null);
-  const [formData, setFormData] = useState({
-    type: "expense" as TransactionType,
-    category: "",
-    amount: "",
-    description: "",
-    date: getToday(),
-  });
+
+  const loadCategories = async () => {
+    try {
+      const income = await getCategoriesByType('income');
+      const expense = await getCategoriesByType('expense');
+      setCategories({ income, expense });
+    } catch {
+      // ignore
+    }
+  };
+  
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  useEffect(() => {
     loadCategories();
+  }, []);
+
+  const [formData, setFormData] = useState<TransactionFormData>({
+    type: "expense",
+    category: "",
+    amount: "",
+    description: "",
+    date: selectedDate,
+  });
+
+  const [toast, setToast] = useState<string | null>(null);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
+  const toastTranslateY = useRef(new Animated.Value(40)).current;
+  const toastTimerRef = useRef<number | null>(null);
+  const windowWidth = Dimensions.get('window').width;
+
+  const showToast = (message: string) => {
+    // clear any existing timer/animation
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+
+    setToast(message);
+
+    // reset values
+    toastOpacity.setValue(0);
+    toastTranslateY.setValue(40);
+
+    // slide up + fade in
+    Animated.parallel([
+      Animated.timing(toastOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+      Animated.timing(toastTranslateY, { toValue: 0, duration: 250, useNativeDriver: true }),
+    ]).start();
+
+    // auto hide after delay
+    toastTimerRef.current = (setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(toastOpacity, { toValue: 0, duration: 250, useNativeDriver: true }),
+        Animated.timing(toastTranslateY, { toValue: 40, duration: 250, useNativeDriver: true }),
+      ]).start(() => {
+        setToast(null);
+        if (toastTimerRef.current) {
+          clearTimeout(toastTimerRef.current);
+          toastTimerRef.current = null;
+        }
+      });
+    }, 2200) as unknown) as number;
+  };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const [party, setParty] = useState<any>(null);
+
+  const loadPartyInfo = async () => {
+    try {
+      const { getParty, getUserParty } = await import('@/utils/party');
+      const partyData = await getParty();
+      const userPartyData = await getUserParty();
+      setParty(partyData ? { ...partyData, userRole: userPartyData?.role } : null);
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
     loadPartyInfo();
   }, []);
 
-  // 1. selectedDate가 변경될 때 달력도 업데이트되도록 useEffect 추가
-  useEffect(() => {
-    const d = new Date(selectedDate);
-    setSelectedYear(d.getFullYear());
-    setSelectedMonth(d.getMonth() + 1);
-  }, [selectedDate]);
+              
 
-  useFocusEffect(
-    React.useCallback(() => {
-      loadCategories();
-      loadData();
-      loadPartyInfo();
-    }, [])
-  );
+  
 
-  const loadData = async () => {
-    const data = await loadTransactions();
-    setTransactions(data);
+  const getYearOptions = () => {
+    const currentYear = new Date().getFullYear();
+    const years = [];
+    for (let i = currentYear - 5; i <= currentYear + 5; i++) {
+      years.push(i);
+    }
+    return years;
   };
 
-  const loadCategories = async () => {
-    const incomeCats = await getCategoriesByType("income");
-    const expenseCats = await getCategoriesByType("expense");
-    setCategories({
-      income: incomeCats,
-      expense: expenseCats,
+  const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1);
+
+  const handleYearChange = (year: number) => {
+    setSelectedYear(year);
+    // 년도 변경 시 기본 선택일을 1일로 설정
+    const newDate = `${year}-${String(selectedMonth).padStart(2, "0")}-01`;
+    updateSelectedDate(newDate);
+  };
+
+  const handleMonthChange = (month: number) => {
+    setSelectedMonth(month);
+    // 월 변경 시 기본 선택일을 1일로 설정
+    const newDate = `${selectedYear}-${String(month).padStart(2, "0")}-01`;
+    updateSelectedDate(newDate);
+  };
+
+  const getMarkedDates = () => {
+    const marked: any = {};
+    transactions.forEach((transaction) => {
+      if (!marked[transaction.date]) {
+        marked[transaction.date] = {
+          marked: true,
+          dotColor: transaction.type === "income" ? "#10b981" : "#ef4444",
+        };
+      }
     });
-  };
-
-  const loadPartyInfo = async () => {
-    const partyData = await getParty();
-    const userPartyData = await getUserParty();
-    setParty(
-      partyData ? { ...partyData, userRole: userPartyData?.role } : null
-    );
+    if (selectedDate) {
+      marked[selectedDate] = {
+        ...marked[selectedDate],
+        selected: true,
+        selectedColor: "#3b82f6",
+      };
+    }
+    return marked;
   };
 
   const getTransactionsForDate = (date: string) => {
@@ -173,61 +269,14 @@ export default function HomeScreen() {
     return { income, expense, balance: income - expense };
   };
 
-  const getCumulativeBalance = (date: string) => {
-    const cumulative = transactions
-      .filter((t) => t.date <= date)
-      .reduce(
-        (sum, t) => (t.type === "income" ? sum + t.amount : sum - t.amount),
-        0
-      );
-    return cumulative;
-  };
-
-  const getYearOptions = () => {
-    const currentYear = new Date().getFullYear();
-    const years = [];
-    for (let i = currentYear - 5; i <= currentYear + 5; i++) {
-      years.push(i);
+  const loadData = async () => {
+    try {
+      const data = await loadTransactions();
+      setTransactions(data);
+    } catch (e) {
+      console.error('Failed to load transactions:', e);
+      setTransactions([]);
     }
-    return years;
-  };
-
-  const monthOptions = Array.from({ length: 12 }, (_, i) => i + 1);
-
-  const handleYearChange = (year: number) => {
-    setSelectedYear(year);
-    // 현재 선택된 날짜의 일(day)을 유지하면서 년도만 변경
-    const day = selectedDate.split("-")[2];
-    const newDate = `${year}-${String(selectedMonth).padStart(2, "0")}-${day}`;
-    setSelectedDate(newDate);
-  };
-
-  const handleMonthChange = (month: number) => {
-    setSelectedMonth(month);
-    // 현재 선택된 날짜의 일(day)을 유지하면서 월만 변경
-    const day = selectedDate.split("-")[2];
-    const newDate = `${selectedYear}-${String(month).padStart(2, "0")}-${day}`;
-    setSelectedDate(newDate);
-  };
-
-  const getMarkedDates = () => {
-    const marked: any = {};
-    transactions.forEach((transaction) => {
-      if (!marked[transaction.date]) {
-        marked[transaction.date] = {
-          marked: true,
-          dotColor: transaction.type === "income" ? "#10b981" : "#ef4444",
-        };
-      }
-    });
-    if (selectedDate) {
-      marked[selectedDate] = {
-        ...marked[selectedDate],
-        selected: true,
-        selectedColor: "#3b82f6",
-      };
-    }
-    return marked;
   };
 
   const handleSave = async () => {
@@ -245,31 +294,40 @@ export default function HomeScreen() {
     const category = formData.category || "미분류";
     const description = formData.description || "";
 
-    if (editingTransaction) {
-      const updated: Transaction = {
-        ...editingTransaction,
-        date: formData.date,
-        type: formData.type,
-        category,
-        amount,
-        description,
-      };
-      await updateTransaction(editingTransaction.id, updated);
-    } else {
-      const newTransaction: Transaction = {
-        id: '', // UUID는 addTransaction에서 생성됨
-        date: formData.date,
-        type: formData.type,
-        category,
-        amount,
-        description,
-        createdAt: Date.now(),
-      };
-      await addTransaction(newTransaction);
-    }
+      const wasEditing = !!editingTransaction;
+      try {
+        if (editingTransaction) {
+          const updated: Transaction = {
+            ...editingTransaction,
+            date: formData.date,
+            type: formData.type,
+            category,
+            amount,
+            description,
+          };
+          await updateTransaction(editingTransaction.id, updated);
+        } else {
+          const newTransaction: Transaction = {
+            id: '', // UUID는 addTransaction에서 생성됨
+            date: formData.date,
+            type: formData.type,
+            category,
+            amount,
+            description,
+            createdAt: Date.now(),
+          };
+          await addTransaction(newTransaction);
+        }
 
-    await loadData();
-    resetForm();
+        await loadData();
+        resetForm();
+        // close modal and show success toast
+        closeModal();
+        showToast(wasEditing ? '거래가 수정되었습니다.' : '거래가 등록되었습니다.');
+      } catch (e: any) {
+        console.error('Failed to save transaction:', e);
+        Alert.alert('오류', e?.message || '거래를 저장하는 중 오류가 발생했습니다.');
+      }
   };
 
   const handleDelete = (id: string) => {
@@ -281,6 +339,7 @@ export default function HomeScreen() {
         onPress: async () => {
           await deleteTransaction(id);
           await loadData();
+          showToast('거래가 삭제되었습니다.');
         },
       },
     ]);
@@ -304,21 +363,27 @@ export default function HomeScreen() {
       category: "",
       amount: "",
       description: "",
-      date: selectedDate,
+      date: selectedDateRef.current,
     });
   };
 
-  const openAddModal = () => {
-    resetForm();
-    setFormData((prev) => ({ ...prev, date: selectedDate }));
-    openModal(); // setModalVisible(true) 대신
-  };
+  // openAddModal removed — use central tab add button which calls openModal();
+  // modal open is watched in a useEffect which calls resetForm() and syncs form date.
 
   const dayTransactions = getTransactionsForDate(selectedDate);
-  const totals = getTotalForDate(selectedDate);
   const monthTotals = getMonthlyTotals(selectedDate);
-  const cumulativeBalance = getCumulativeBalance(selectedDate);
-  const { session, signOut, isGuest, userName } = useAuth();
+  // Ensure auth hook is initialized (subscription) without creating unused vars
+  useAuth();
+
+  useEffect(() => {
+    // Ensure when the add modal opens, the form date reflects the latest selected date
+    if (isModalOpen && !editingTransaction) {
+      // reset form and sync the date so any caller of openModal (e.g. central tab button)
+      // will get the same behaviour as the in-page add button used previously.
+      resetForm();
+      setFormData((prev) => ({ ...prev, date: selectedDateRef.current }));
+    }
+  }, [isModalOpen, editingTransaction]);
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff', paddingTop: 0}}>
       <View className="pt-4 pb-4 px-4 bg-blue-500">
@@ -345,26 +410,63 @@ export default function HomeScreen() {
             </View>
 
             {/* Select boxes row (below title) */}
-            <View className="flex-row items-center mt-2">
-              <CustomDropdown
-                items={getYearOptions().map(String)}
-                selectedValue={String(selectedYear)}
-                onValueChange={(val) => handleYearChange(Number(val))}
-                label="년"
-                containerStyle={{ marginRight: 8, minWidth: 120 }}
-                textColor="white"
-                borderColor="white/30"
-              />
+            <View className="flex-row items-center mt-2 justify-between">
+              <View className="flex-row items-center">
+                <CustomDropdown
+                  items={getYearOptions().map(String)}
+                  selectedValue={String(selectedYear)}
+                  onValueChange={(val) => handleYearChange(Number(val))}
+                  label="년"
+                  compact
+                  containerStyle={{ marginRight: 8, minWidth: 84 }}
+                  textStyle={{ fontSize: 14 }}
+                  textColor="white"
+                  borderColor="white/30"
+                />
 
-              <CustomDropdown
-                items={monthOptions.map(String)}
-                selectedValue={String(selectedMonth)}
-                onValueChange={(val) => handleMonthChange(Number(val))}
-                label="월"
-                containerStyle={{ minWidth: 110 }}
-                textColor="white"
-                borderColor="white/30"
-              />
+                <CustomDropdown
+                  items={monthOptions.map(String)}
+                  selectedValue={String(selectedMonth)}
+                  onValueChange={(val) => handleMonthChange(Number(val))}
+                  label="월"
+                  compact
+                  containerStyle={{ minWidth: 76 }}
+                  textStyle={{ fontSize: 14 }}
+                  textColor="white"
+                  borderColor="white/30"
+                />
+              </View>
+
+              {/* View mode switch (right-aligned) */}
+              <View className="ml-3">
+                <View className="rounded-full bg-white/10 p-1" style={{ flexDirection: 'row' }}>
+                  <TouchableOpacity
+                    onPress={() => setViewMode('calendar')}
+                    style={{
+                      paddingVertical: 6,
+                      paddingHorizontal: 10,
+                      borderRadius: 999,
+                      backgroundColor: viewMode === 'calendar' ? '#ffffff' : 'transparent',
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={{ color: viewMode === 'calendar' ? '#1f2937' : '#fff', fontWeight: '600' }}>캘린더</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => setViewMode('list')}
+                    style={{
+                      paddingVertical: 6,
+                      paddingHorizontal: 10,
+                      borderRadius: 999,
+                      backgroundColor: viewMode === 'list' ? '#ffffff' : 'transparent',
+                      marginLeft: 4,
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={{ color: viewMode === 'list' ? '#1f2937' : '#fff', fontWeight: '600' }}>리스트</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
             </View>
           </View>
@@ -397,245 +499,352 @@ export default function HomeScreen() {
 
       <ScrollView className="flex-1">
         <View className="p-4">
-          <Calendar
-            key={`${selectedYear}-${selectedMonth}`}
-            current={selectedDate}
-            onDayPress={(day) => setSelectedDate(day.dateString)}
-            onMonthChange={(date) => {
-              const d = new Date(date.dateString);
-              setSelectedYear(d.getFullYear());
-              setSelectedMonth(d.getMonth() + 1);
-              // selectedDate도 업데이트 (현재 선택된 날의 day 유지)
-              const currentDay = selectedDate.split("-")[2];
-              setSelectedDate(
-                `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-                  2,
-                  "0"
-                )}-${currentDay}`
-              );
-            }}
-            markedDates={getMarkedDates()}
-            monthFormat={"yyyy년 M월"}
-            dayComponent={({ date, marking, state }) => {
-              if (!date) return null;
-              const day = date.dateString;
-              const dayOfWeek = new Date(day + "T00:00:00").getDay();
-              const isSelected = marking?.selected;
-              const isToday = day === getToday();
-              const baseColor =
-                dayOfWeek === 0
-                  ? "#ef4444"
-                  : dayOfWeek === 6
-                  ? "#2563eb"
-                  : "#1f2937";
-              const textColor = isSelected
-                ? "#ffffff"
-                : state === "disabled"
-                ? "#d1d5db"
-                : baseColor;
+          {viewMode === 'calendar' ? (
+            <>
+              {/* Month pills: current -2 .. current +2 */}
+              <View className="flex-row justify-center items-center mb-3">
+                {(() => {
+                  const pills: { year: number; month: number; label: string; offset: number }[] = [];
+                  for (let offset = -2; offset <= 2; offset++) {
+                    const d = new Date(selectedYear, selectedMonth - 1 + offset, 1);
+                    pills.push({ year: d.getFullYear(), month: d.getMonth() + 1, label: `${d.getMonth() + 1}월`, offset });
+                  }
 
-              return (
-                <TouchableOpacity
-                  onPress={() => setSelectedDate(day)}
-                  disabled={state === "disabled"}
-                  style={{}}
-                >
-                  <View
-                    style={{
-                      backgroundColor: isSelected ? "#3b82f6" : "transparent",
-                      borderRadius: 8,
-                      width: 30,
-                      height: 30,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        position: "relative",
-                        textAlign: "center",
-                        color: textColor,
-                        fontWeight: isSelected ? "700" : "500",
-                        lineHeight: 30,
-                      }}
-                    >
-                      {date.day}
-                    </Text>
-                    {marking?.marked && (
-                      <View
-                        style={{
-                          position: 'absolute',
-                          bottom: -10,
-                          width: 6,
-                          height: 6,
-                          borderRadius: 3,
-                          backgroundColor: isSelected
-                            ? "#ffffff"
-                            : marking.dotColor || "#3b82f6",
-                          alignSelf: "center",
+                  return pills.map((p) => {
+                    const isCurrent = p.year === selectedYear && p.month === selectedMonth;
+                    return (
+                      <TouchableOpacity
+                        key={`${p.year}-${p.month}`}
+                        onPress={() => {
+                          setSelectedYear(p.year);
+                          setSelectedMonth(p.month);
+                          updateSelectedDate(`${p.year}-${String(p.month).padStart(2, '0')}-01`);
                         }}
-                      />
-                    )}
-                    {isToday && !isSelected && (
-                      <View
+                        className="mx-1"
+                        activeOpacity={0.9}
                         style={{
-                          position: "absolute",
-                          bottom: -2,
-                          width: 6,
-                          height: 2,
-                          backgroundColor: "#3b82f6",
-                          alignSelf: "center",
-                          marginTop: 4,
+                          borderRadius: 999,
+                          paddingVertical: 6,
+                          paddingHorizontal: 12,
+                          backgroundColor: isCurrent ? '#3b82f6' : '#ffffff',
+                          borderWidth: isCurrent ? 0 : 1,
+                          borderColor: isCurrent ? 'transparent' : '#e5e7eb',
                         }}
-                      />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              );
-            }}
-            theme={{
-              backgroundColor: "#ffffff",
-              calendarBackground: "#ffffff",
-              textSectionTitleColor: "#6b7280",
-              selectedDayBackgroundColor: "#3b82f6",
-              selectedDayTextColor: "#ffffff",
-              todayTextColor: "#3b82f6",
-              dayTextColor: "#1f2937",
-              textDisabledColor: "#d1d5db",
-              dotColor: "#3b82f6",
-              selectedDotColor: "#ffffff",
-              arrowColor: "#3b82f6",
-              monthTextColor: "#1f2937",
-              indicatorColor: "#3b82f6",
-              textDayFontWeight: "400",
-              textMonthFontWeight: "600",
-              textDayHeaderFontWeight: "600",
-            }}
-            style={{
-              borderRadius: 10,
-              elevation: 4,
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.1,
-              shadowRadius: 4,
-            }}
-          />
-        </View>
-
-        <View className="px-4 mb-4">
-          <View className="bg-gray-50 rounded-lg p-4 flex-row justify-between">
-            <View className="items-center flex-1">
-              <Text className="text-gray-500 text-sm mb-1">수입</Text>
-              <Text className="text-green-600 text-xl font-bold">
-                {totals.income.toLocaleString()}원
-              </Text>
-            </View>
-            <View className="w-px bg-gray-300" />
-            <View className="items-center flex-1">
-              <Text className="text-gray-500 text-sm mb-1">지출</Text>
-              <Text className="text-red-600 text-xl font-bold">
-                {totals.expense.toLocaleString()}원
-              </Text>
-            </View>
-            <View className="w-px bg-gray-300" />
-            <View className="items-center flex-1">
-              <Text className="text-gray-500 text-sm mb-1">잔액</Text>
-              <Text
-                className={`text-xl font-bold ${
-                  cumulativeBalance >= 0 ? "text-blue-600" : "text-red-600"
-                }`}
-              >
-                {cumulativeBalance.toLocaleString()}원
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View className="px-4 mb-4">
-          <Text className="text-lg font-semibold mb-3 text-gray-800">
-            거래 내역
-          </Text>
-          {dayTransactions.length === 0 ? (
-            <View className="bg-gray-50 rounded-lg p-8 items-center">
-              <Text className="text-gray-400">등록된 거래가 없습니다</Text>
-            </View>
-          ) : (
-            dayTransactions.map((transaction) => (
-              <View
-                key={transaction.id}
-                className="bg-white rounded-lg p-4 mb-2 border border-gray-200 flex-row items-center justify-between"
-              >
-                <View className="flex-1">
-                  <View className="flex-row items-center mb-1">
-                    <View
-                      className={`px-2 py-1 rounded ${
-                        transaction.type === "income"
-                          ? "bg-green-100"
-                          : "bg-red-100"
-                      }`}
-                    >
-                      <Text
-                        className={`text-xs font-semibold ${
-                          transaction.type === "income"
-                            ? "text-green-700"
-                            : "text-red-700"
-                        }`}
                       >
-                        {transaction.type === "income" ? "수입" : "지출"}
-                      </Text>
-                    </View>
-                    <Text className="ml-2 text-gray-600 text-sm">
-                      {transaction.category}
-                    </Text>
-                  </View>
-                  <Text className="text-gray-800 font-medium">
-                    {transaction.description}
-                  </Text>
-                  <Text
-                    className={`text-lg font-bold mt-1 ${
-                      transaction.type === "income"
-                        ? "text-green-600"
-                        : "text-red-600"
-                    }`}
-                  >
-                    {transaction.type === "income" ? "+" : "-"}
-                    {transaction.amount.toLocaleString()}원
-                  </Text>
-                </View>
-                <View className="flex-row gap-2">
-                  <TouchableOpacity
-                    onPress={() => handleEdit(transaction)}
-                    className="bg-blue-500 px-3 py-2 rounded"
-                  >
-                    <Text className="text-white text-xs">수정</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={() => handleDelete(transaction.id)}
-                    className="bg-red-500 px-3 py-2 rounded"
-                  >
-                    <Text className="text-white text-xs">삭제</Text>
-                  </TouchableOpacity>
+                        <Text style={{ color: isCurrent ? '#ffffff' : '#374151', fontWeight: isCurrent ? '700' : '600' }}>{p.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  });
+                })()}
+              </View>
+
+              {/* Weekday header with light gray background */}
+              <View style={{ backgroundColor: '#f3f4f6', borderRadius: 8, paddingVertical: 6, marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 6 }}>
+                  {['일','월','화','수','목','금','토'].map((d) => (
+                    <Text key={d} style={{ flex: 1, textAlign: 'center', color: '#6b7280', fontWeight: '600' }}>{d}</Text>
+                  ))}
                 </View>
               </View>
-            ))
+
+              <Calendar
+              key={`${selectedYear}-${selectedMonth}`}
+              current={selectedDate}
+              hideArrows={true}
+              hideDayNames={true}
+              renderHeader={() => null}
+              onDayPress={(day) => updateSelectedDate(day.dateString)}
+              onMonthChange={(date) => {
+                const d = new Date(date.dateString);
+                setSelectedYear(d.getFullYear());
+                setSelectedMonth(d.getMonth() + 1);
+                // 달이 바뀌면 기본 선택일을 1일로 설정
+                updateSelectedDate(
+                  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`
+                );
+              }}
+              markedDates={getMarkedDates()}
+              monthFormat={"yyyy년 M월"}
+              dayComponent={({ date, marking, state }) => {
+                if (!date) return null;
+                const day = date.dateString;
+                const dayOfWeek = new Date(day + "T00:00:00").getDay();
+                const isSelected = marking?.selected;
+                const isToday = day === getToday();
+                const TODAY_COLOR = '#047857';
+                const baseColor =
+                  dayOfWeek === 0
+                    ? "#ef4444"
+                    : dayOfWeek === 6
+                    ? "#2563eb"
+                    : "#1f2937";
+                const dateTextColor = isSelected
+                  ? "#ffffff"
+                  : isToday
+                  ? TODAY_COLOR
+                  : state === "disabled"
+                  ? "#d1d5db"
+                  : baseColor;
+                const totalsForDay = getTotalForDate(day);
+
+                const formatMan = (amount: number) => {
+                  const v = amount / 10000;
+                  return `${v.toFixed(3).replace(/\.?0+$/, "")}만`;
+                };
+
+                return (
+                    <TouchableOpacity
+                    onPress={() => updateSelectedDate(day)}
+                    disabled={state === "disabled"}
+                    style={{}}
+                  >
+                    <View
+                      style={{
+                        borderRadius: 4,
+                        width: 36,
+                        height: 56,
+                        alignItems: 'center',
+                        paddingTop: 6,
+                        overflow: 'visible',
+                      }}
+                    >
+                      {/* selected indicator behind the date number only */}
+                      {isSelected && (
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: 6,
+                            width: 28,
+                            height: 28,
+                            borderRadius: 6,
+                            backgroundColor: '#3b82f6',
+                            alignSelf: 'center',
+                            zIndex: 0,
+                          }}
+                        />
+                      )}
+
+                      {/* today indicator when not selected: same shape as selected but light sky-blue */}
+                      {isToday && !isSelected && (
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: 6,
+                            width: 28,
+                            height: 28,
+                            borderRadius: 6,
+                            backgroundColor: '#e0f2fe',
+                            alignSelf: 'center',
+                            zIndex: 0,
+                          }}
+                        />
+                      )}
+
+                      <Text
+                        style={{
+                          textAlign: "center",
+                          color: dateTextColor,
+                          fontWeight: isSelected ? "700" : "500",
+                          fontSize: 14,
+                          zIndex: 1,
+                        }}
+                      >
+                        {date.day}
+                      </Text>
+                      {/* per-day summary: show income/expense below the date (replaces dot) */}
+                      {(totalsForDay.income > 0 || totalsForDay.expense > 0) && (
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: 38,
+                            width: '100%',
+                            left: 0,
+                            alignItems: 'center',
+                          }}
+                        >
+                          {totalsForDay.income > 0 && (
+                            <Text
+                              style={{
+                                color: '#10b981',
+                                fontSize: 10,
+                                lineHeight: 12,
+                              }}
+                            >
+                              {formatMan(totalsForDay.income)}
+                            </Text>
+                          )}
+                          {totalsForDay.expense > 0 && (
+                            <Text
+                              style={{
+                                color: '#ef4444',
+                                fontSize: 10,
+                                lineHeight: 12,
+                              }}
+                            >
+                              {formatMan(totalsForDay.expense)}
+                            </Text>
+                          )}
+                        </View>
+                      )}
+                      {/* removed today's small bottom bar; today now uses different text color */}
+                    </View>
+                  </TouchableOpacity>
+                );
+              }}
+              theme={{
+                backgroundColor: "#ffffff",
+                calendarBackground: "#ffffff",
+                textSectionTitleColor: "#6b7280",
+                selectedDayBackgroundColor: "#3b82f6",
+                selectedDayTextColor: "#ffffff",
+                todayTextColor: "#3b82f6",
+                dayTextColor: "#1f2937",
+                textDisabledColor: "#d1d5db",
+                dotColor: "#3b82f6",
+                selectedDotColor: "#ffffff",
+                arrowColor: "#3b82f6",
+                monthTextColor: "#1f2937",
+                indicatorColor: "#3b82f6",
+                textDayFontWeight: "400",
+                textMonthFontWeight: "600",
+                textDayHeaderFontWeight: "600",
+              }}
+              style={{
+                borderRadius: 10,
+                // shadow removed per design
+              }}
+            />
+            </>
+          ) : (
+            <View>
+              {(() => {
+                // collect unique dates in the selected month that have transactions
+                const prefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+                const datesWithTx = Array.from(
+                  new Set(
+                    transactions
+                      .filter((t) => t.date.startsWith(prefix))
+                      .map((t) => t.date)
+                  )
+                ).sort((a, b) => (a < b ? 1 : -1)); // newest first
+
+                if (datesWithTx.length === 0) {
+                  return (
+                    <View className="bg-gray-50 rounded-lg p-8 items-center">
+                      <Text className="text-gray-400">거래 내역이 없습니다</Text>
+                    </View>
+                  );
+                }
+
+                return datesWithTx.map((day) => {
+                  const txs = getTransactionsForDate(day);
+                  const totals = getTotalForDate(day);
+                  return (
+                    <View key={day} className="mb-3">
+                      <View className="flex-row justify-between items-center mb-2">
+                        <Text className="font-semibold">{`${Number(day.split('-')[1])}월 ${Number(day.split('-')[2])}일`}</Text>
+                        <Text className="text-sm">수입 {totals.income.toLocaleString()} · 지출 {totals.expense.toLocaleString()}</Text>
+                      </View>
+
+                      <View className="bg-white rounded-lg p-2 shadow-sm">
+                        {txs.map((t) => (
+                          <View key={t.id} className="flex-row justify-between items-center p-2 border-b last:border-b-0">
+                            <View>
+                              <Text className="font-medium">{t.category}</Text>
+                              {t.description ? <Text className="text-xs text-gray-500">{t.description}</Text> : null}
+                            </View>
+                            <Text className={`font-semibold ${t.type === 'income' ? 'text-green-600' : 'text-red-500'}`}>{(t.type === 'income' ? '+' : '-') + t.amount.toLocaleString()}원</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  );
+                });
+              })()}
+            </View>
+          )}
+        </View>
+
+        {/* per-day totals removed as requested */}
+
+            <View className="px-4 mb-4">
+          {viewMode === 'calendar' && (
+            <>
+              <Text style={{ marginVertical: 20 }} className="text-lg font-semibold text-gray-800">{`${Number(selectedMonth)}월 ${Number(selectedDate.split('-')[2])}일 거래내역`}</Text>
+              {dayTransactions.length === 0 ? (
+                <View className="bg-gray-50 rounded-lg p-8 items-center">
+                  <Text className="text-gray-400">등록된 거래가 없습니다</Text>
+                </View>
+              ) : (
+                dayTransactions.map((transaction) => (
+                  <View
+                    key={transaction.id}
+                    className="bg-white rounded-lg p-4 mb-2 border border-gray-200 flex-row items-center justify-between"
+                  >
+                    <View className="flex-1">
+                      <View className="flex-row items-center mb-1">
+                        <View
+                          className={`px-2 py-1 rounded ${
+                            transaction.type === "income" ? "bg-green-100" : "bg-red-100"
+                          }`}
+                        >
+                          <Text
+                            className={`text-xs font-semibold ${
+                              transaction.type === "income" ? "text-green-700" : "text-red-700"
+                            }`}
+                          >
+                            {transaction.type === "income" ? "수입" : "지출"}
+                          </Text>
+                        </View>
+                        <Text className="ml-2 text-gray-600 text-sm">{transaction.category}</Text>
+                      </View>
+                      <Text className="text-gray-800 font-medium">{transaction.description}</Text>
+                      <Text className={`text-lg font-bold mt-1 ${transaction.type === "income" ? "text-green-600" : "text-red-600"}`}>
+                        {transaction.type === "income" ? "+" : "-"}{transaction.amount.toLocaleString()}원
+                      </Text>
+                    </View>
+                    <View className="flex-row gap-2">
+                      <TouchableOpacity onPress={() => handleEdit(transaction)} className="bg-blue-500 px-3 py-2 rounded">
+                        <Text className="text-white text-xs">수정</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => handleDelete(transaction.id)} className="bg-red-500 px-3 py-2 rounded">
+                        <Text className="text-white text-xs">삭제</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </>
           )}
         </View>
       </ScrollView>
 
-      {/* <TouchableOpacity
-        onPress={openAddModal}
-        className="absolute bg-blue-500 w-16 h-16 rounded-full items-center justify-center shadow-lg"
-        style={{
-          bottom: 20,
-          left: "50%",
-          marginLeft: -32,
-          elevation: 8,
-          shadowColor: "#000",
-          shadowOffset: { width: 0, height: 4 },
-          shadowOpacity: 0.3,
-          shadowRadius: 4,
-        }}
-      >
-        <Text className="text-white text-3xl font-bold">+</Text>
-      </TouchableOpacity> */}
+      {/* Toast */}
+      {toast ? (
+        <Animated.View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            bottom: 100,
+            alignSelf: 'center',
+            backgroundColor: 'rgba(0,0,0,0.85)',
+            paddingVertical: 10,
+            paddingHorizontal: 18,
+            borderRadius: 99,
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: toastOpacity,
+            transform: [{ translateY: toastTranslateY }],
+            // make width match content but not exceed screen
+            maxWidth: windowWidth - 40,
+            minWidth: 80,
+          }}
+        >
+          <Text style={{ color: 'white', textAlign: 'center' }}>{toast}</Text>
+        </Animated.View>
+      ) : null}
+
+      {/* Floating add button removed to avoid duplication with tab bar add button. Use the central tab add button. */}
 
       <Modal
         visible={isModalOpen}

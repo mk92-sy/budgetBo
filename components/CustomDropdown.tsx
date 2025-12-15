@@ -21,6 +21,7 @@ interface CustomDropdownProps {
   backgroundColor?: string;
   textColor?: string;
   dropdownMaxHeight?: number;
+  compact?: boolean;
 }
 
 export const CustomDropdown: React.FC<CustomDropdownProps> = ({
@@ -34,6 +35,7 @@ export const CustomDropdown: React.FC<CustomDropdownProps> = ({
   backgroundColor = 'transparent',
   textColor = 'white',
   dropdownMaxHeight = 250,
+  compact = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -49,22 +51,22 @@ export const CustomDropdown: React.FC<CustomDropdownProps> = ({
         style={{
           borderWidth: 1,
           borderColor: borderColor === 'white/30' ? '#ffffff4d' : borderColor,
-          borderRadius: 8,
+          borderRadius: compact ? 6 : 8,
           overflow: 'hidden',
           backgroundColor,
-          paddingHorizontal: 8,
-          paddingVertical: 6,
+          paddingHorizontal: compact ? 6 : 8,
+          paddingVertical: compact ? 4 : 6,
           flexDirection: 'row',
           justifyContent: 'space-between',
           alignItems: 'center',
-          minHeight: 44,
+          minHeight: compact ? 34 : 44,
         }}
       >
         <Text
           style={[
             {
               color: textColor,
-              fontSize: 16,
+              fontSize: compact ? 14 : 16,
               fontWeight: '500',
               fontFamily: 'Pretendard',
             },

@@ -40,7 +40,7 @@ export default function LoginScreen() {
           setRememberMe(true);
           if (em) setLoginEmail(em);
         }
-      } catch (e) {
+      } catch {
         // ignore
       }
     };
@@ -51,7 +51,7 @@ export default function LoginScreen() {
       try {
         await NavigationBar.setBackgroundColorAsync('#ffffff');
         await NavigationBar.setButtonStyleAsync('dark');
-      } catch (e) {
+      } catch {
         // ignore if unavailable
       }
     })();

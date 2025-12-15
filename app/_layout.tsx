@@ -30,7 +30,7 @@ export default function RootLayout() {
       (Text as any).defaultProps.style = { ...((Text as any).defaultProps.style || {}), fontFamily: 'Pretendard' };
       (TextInput as any).defaultProps = (TextInput as any).defaultProps || {};
       (TextInput as any).defaultProps.style = { ...((TextInput as any).defaultProps.style || {}), fontFamily: 'Pretendard' };
-    } catch (e) {
+    } catch {
       // ignore in environments that don't support defaultProps
     }
   }
