@@ -1,6 +1,6 @@
-import { Transaction } from '@/types/transaction';
-import { ScrollView, Text, useWindowDimensions, View } from 'react-native';
-import { BarChart, LineChart, PieChart } from 'react-native-chart-kit';
+import { Transaction } from "@/types/transaction";
+import { ScrollView, Text, useWindowDimensions, View } from "react-native";
+import { BarChart, LineChart, PieChart } from "react-native-chart-kit";
 
 function getDaysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();
@@ -21,12 +21,12 @@ export default function StatsCharts({ transactions, year, month }: Props) {
   const dailyExpense = Array(days).fill(0);
 
   transactions.forEach((t) => {
-    if (!t.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) return;
-    const day = Number(t.date.split('-')[2]);
+    if (!t.date.startsWith(`${year}-${String(month).padStart(2, "0")}`)) return;
+    const day = Number(t.date.split("-")[2]);
     const idx = day - 1;
-    if (t.type === 'income') dailyNet[idx] += t.amount;
+    if (t.type === "income") dailyNet[idx] += t.amount;
     else dailyNet[idx] -= t.amount;
-    if (t.type === 'expense') dailyExpense[idx] += t.amount;
+    if (t.type === "expense") dailyExpense[idx] += t.amount;
   });
 
   // make cumulative balance for line chart
@@ -39,8 +39,8 @@ export default function StatsCharts({ transactions, year, month }: Props) {
   // Category pie chart (expense categories)
   const categoryMap: Record<string, number> = {};
   transactions.forEach((t) => {
-    if (!t.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)) return;
-    if (t.type === 'expense') {
+    if (!t.date.startsWith(`${year}-${String(month).padStart(2, "0")}`)) return;
+    if (t.type === "expense") {
       categoryMap[t.category] = (categoryMap[t.category] || 0) + t.amount;
     }
   });
@@ -48,20 +48,20 @@ export default function StatsCharts({ transactions, year, month }: Props) {
   const pieData = Object.keys(categoryMap).map((k, idx) => ({
     name: k,
     amount: categoryMap[k],
-    color: ['#f97316', '#ef4444', '#10b981', '#6366f1', '#f43f5e'][idx % 5],
-    legendFontColor: '#333',
+    color: ["#f97316", "#ef4444", "#10b981", "#6366f1", "#f43f5e"][idx % 5],
+    legendFontColor: "#333",
     legendFontSize: 12,
   }));
 
   const chartConfig = {
-    backgroundColor: '#ffffff',
-    backgroundGradientFrom: '#ffffff',
-    backgroundGradientTo: '#ffffff',
+    backgroundColor: "#ffffff",
+    backgroundGradientFrom: "#ffffff",
+    backgroundGradientTo: "#ffffff",
     decimalPlaces: 0,
     color: (opacity = 1) => `rgba(59,130,246, ${opacity})`,
     labelColor: (opacity = 1) => `rgba(55,65,81, ${opacity})`,
     style: { borderRadius: 8 },
-    propsForDots: { r: '3', strokeWidth: '0' },
+    propsForDots: { r: "3", strokeWidth: "0" },
   } as any;
 
   const labels = Array.from({ length: days }, (_, i) => String(i + 1));
@@ -76,10 +76,15 @@ export default function StatsCharts({ transactions, year, month }: Props) {
           </View>
         ) : (
           <LineChart
-            data={{ labels: labels.map((l, i) => (i % Math.ceil(days / 6) === 0 ? l : '')), datasets: [{ data: cumulative.map((n) => Math.round(n)) }] }}
+            data={{
+              labels: labels.map((l, i) => (i % Math.ceil(days / 6) === 0 ? l : "")),
+              datasets: [{ data: cumulative.map((n) => Math.round(n)) }],
+            }}
             width={Math.min(width - 32, 720)}
             height={220}
             chartConfig={chartConfig}
+            yAxisLabel=""
+            yAxisSuffix=""
             bezier
             style={{ borderRadius: 8 }}
           />
@@ -89,10 +94,15 @@ export default function StatsCharts({ transactions, year, month }: Props) {
       <View className="mb-4">
         <Text className="text-gray-800 font-semibold mb-2">일별 지출</Text>
         <BarChart
-          data={{ labels: labels.map((l, i) => (i % Math.ceil(days / 7) === 0 ? l : '')), datasets: [{ data: dailyExpense.map((n) => Math.round(n)) }] }}
+          data={{
+            labels: labels.map((l, i) => (i % Math.ceil(days / 7) === 0 ? l : "")),
+            datasets: [{ data: dailyExpense.map((n) => Math.round(n)) }],
+          }}
           width={Math.min(width - 32, 720)}
           height={180}
           chartConfig={chartConfig}
+          yAxisLabel=""
+          yAxisSuffix=""
           style={{ borderRadius: 8 }}
         />
       </View>
@@ -105,7 +115,13 @@ export default function StatsCharts({ transactions, year, month }: Props) {
           </View>
         ) : (
           <PieChart
-            data={pieData.map((p) => ({ name: p.name, population: p.amount, color: p.color, legendFontColor: p.legendFontColor, legendFontSize: p.legendFontSize }))}
+            data={pieData.map((p) => ({
+              name: p.name,
+              population: p.amount,
+              color: p.color,
+              legendFontColor: p.legendFontColor,
+              legendFontSize: p.legendFontSize,
+            }))}
             width={Math.min(width - 32, 720)}
             height={200}
             chartConfig={chartConfig}

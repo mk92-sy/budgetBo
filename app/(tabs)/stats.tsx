@@ -1,24 +1,34 @@
 import { CustomDropdown } from '@/components/CustomDropdown';
-import StatsCharts from '@/components/StatsCharts';
+import Skeleton from '@/components/ui/Skeleton';
 import { useAuth } from '@/hooks/useAuth';
 import { Transaction } from '@/types/transaction';
 import { loadTransactions } from '@/utils/storage';
-import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+const StatsCharts = React.lazy(() => import('@/components/StatsCharts'));
 
 export default function StatsScreen() {
   const insets = useSafeAreaInsets();
   const { isGuest } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const today = new Date();
   const [selectedYear, setSelectedYear] = useState(today.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(today.getMonth() + 1);
 
   const loadData = async () => {
-    const data = await loadTransactions();
-    setTransactions(data);
+    setIsLoading(true);
+    try {
+      const data = await loadTransactions();
+      setTransactions(data);
+    } catch (e) {
+      console.warn('Failed to load transactions', e);
+      setTransactions([]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -30,6 +40,15 @@ export default function StatsScreen() {
       loadData();
     }, [])
   );
+
+  const monthSummary = useMemo(() => {
+    const prefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    const monthTx = transactions.filter((t) => t.date.startsWith(prefix));
+    const income = monthTx.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+    const expense = monthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    const balance = income - expense;
+    return { income, expense, balance };
+  }, [transactions, selectedYear, selectedMonth]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#fff' }}>
@@ -75,35 +94,46 @@ export default function StatsScreen() {
 
         <Text className="text-lg font-semibold mb-3">요약</Text>
         <View className="bg-white rounded-lg p-4 mb-3 border border-gray-200">
-          {(() => {
-            const prefix = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
-            const monthTx = transactions.filter((t) => t.date.startsWith(prefix));
-            const income = monthTx.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0);
-            const expense = monthTx.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
-            const balance = income - expense;
-
-            return (
-              <View className="flex-row justify-between">
-                <View className="items-center flex-1">
-                  <Text className="text-gray-500 text-xs">월 수입</Text>
-                  <Text className="text-lg font-bold text-green-600">{income.toLocaleString()}원</Text>
-                </View>
-                <View className="w-px bg-gray-200 mx-2" />
-                <View className="items-center flex-1">
-                  <Text className="text-gray-500 text-xs">월 지출</Text>
-                  <Text className="text-lg font-bold text-red-500">{expense.toLocaleString()}원</Text>
-                </View>
-                <View className="w-px bg-gray-200 mx-2" />
-                <View className="items-center flex-1">
-                  <Text className="text-gray-500 text-xs">월 잔액</Text>
-                  <Text className="text-lg font-bold">{balance.toLocaleString()}원</Text>
-                </View>
+          {isLoading ? (
+            <View className="flex-row justify-between">
+              <View className="items-center flex-1">
+                <Text className="text-gray-500 text-xs">월 수입</Text>
+                <Skeleton width={100} height={22} />
               </View>
-            );
-          })()}
+              <View className="w-px bg-gray-200 mx-2" />
+              <View className="items-center flex-1">
+                <Text className="text-gray-500 text-xs">월 지출</Text>
+                <Skeleton width={100} height={22} />
+              </View>
+              <View className="w-px bg-gray-200 mx-2" />
+              <View className="items-center flex-1">
+                <Text className="text-gray-500 text-xs">월 잔액</Text>
+                <Skeleton width={100} height={22} />
+              </View>
+            </View>
+          ) : (
+            <View className="flex-row justify-between">
+              <View className="items-center flex-1">
+                <Text className="text-gray-500 text-xs">월 수입</Text>
+                <Text className="text-lg font-bold text-green-600">{monthSummary.income.toLocaleString()}원</Text>
+              </View>
+              <View className="w-px bg-gray-200 mx-2" />
+              <View className="items-center flex-1">
+                <Text className="text-gray-500 text-xs">월 지출</Text>
+                <Text className="text-lg font-bold text-red-500">{monthSummary.expense.toLocaleString()}원</Text>
+              </View>
+              <View className="w-px bg-gray-200 mx-2" />
+              <View className="items-center flex-1">
+                <Text className="text-gray-500 text-xs">월 잔액</Text>
+                <Text className="text-lg font-bold">{monthSummary.balance.toLocaleString()}원</Text>
+              </View>
+            </View>
+          )}
         </View>
 
-        <StatsCharts transactions={transactions} year={selectedYear} month={selectedMonth} />
+        <Suspense fallback={<Skeleton width={'100%'} height={280} borderRadius={10} />}>
+          {!isLoading && <StatsCharts transactions={transactions} year={selectedYear} month={selectedMonth} />}
+        </Suspense>
 
       </ScrollView>
     </SafeAreaView>
