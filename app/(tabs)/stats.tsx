@@ -1,13 +1,13 @@
 import { CustomDropdown } from '@/components/CustomDropdown';
+import StatsCharts from '@/components/StatsCharts';
 import Skeleton from '@/components/ui/Skeleton';
 import { useAuth } from '@/hooks/useAuth';
 import { Transaction } from '@/types/transaction';
 import { loadTransactions } from '@/utils/storage';
 import { useFocusEffect } from 'expo-router';
-import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-const StatsCharts = React.lazy(() => import('@/components/StatsCharts'));
 
 export default function StatsScreen() {
   const insets = useSafeAreaInsets();
@@ -131,9 +131,11 @@ export default function StatsScreen() {
           )}
         </View>
 
-        <Suspense fallback={<Skeleton width={'100%'} height={280} borderRadius={10} />}>
-          {!isLoading && <StatsCharts transactions={transactions} year={selectedYear} month={selectedMonth} />}
-        </Suspense>
+        {isLoading ? (
+          <Skeleton width={'100%'} height={280} borderRadius={10} />
+        ) : (
+          <StatsCharts transactions={transactions} year={selectedYear} month={selectedMonth} />
+        )}
 
       </ScrollView>
     </SafeAreaView>

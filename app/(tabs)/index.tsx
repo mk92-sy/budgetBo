@@ -11,6 +11,7 @@ import { addTransaction, deleteTransaction, loadTransactions, updateTransaction 
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useEffect, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
@@ -134,6 +135,76 @@ export default function HomeScreen() {
 
   const [party, setParty] = useState<any>(null);
   const [activeBudget, setActiveBudget] = useState<BudgetBook | null>(null);
+  // budget switcher modal state
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [budgetList, setBudgetList] = useState<BudgetBook[]>([]);
+  const [loadingBudgets, setLoadingBudgets] = useState(false);
+  const [switchingBudgetId, setSwitchingBudgetId] = useState<string | null>(null);
+
+  const loadBudgets = async () => {
+    setLoadingBudgets(true);
+    try {
+      const mod = await import("@/utils/party");
+      const listFn =
+        mod.getAllBudgetBooks ??
+        mod.getBudgetBooks ??
+        mod.getBudgets ??
+        mod.listBudgets ??
+        mod.getPartyBudgets;
+      if (!listFn) {
+        setBudgetList([]);
+        return;
+      }
+      const items: BudgetBook[] = await listFn();
+      setBudgetList(items || []);
+    } catch (e) {
+      console.error("loadBudgets error", e);
+      setBudgetList([]);
+    } finally {
+      setLoadingBudgets(false);
+    }
+  };
+
+  const switchBudget = async (b: BudgetBook) => {
+    setSwitchingBudgetId(b.id ?? b.name ?? String(Math.random()));
+    try {
+      const mod = await import("@/utils/party");
+      const activate =
+        mod.setActiveBudgetBook ?? mod.activateBudgetBook ?? mod.activateBudget ?? mod.setActiveBudget;
+      if (activate) {
+        await activate(b.id ?? (b as any)._id ?? b.name);
+      }
+
+      try {
+        const { emitPartyUpdate } = await import("@/utils/appEvents");
+        emitPartyUpdate();
+      } catch {}
+
+      // refresh local state
+      try {
+        await loadPartyInfo();
+      } catch {}
+      try {
+        const ab = await getActiveBudgetBook();
+        setActiveBudget(ab);
+      } catch {
+        setActiveBudget(null);
+      }
+      try {
+        await loadData();
+        await loadCategories();
+      } catch {}
+
+      showToast("가계부가 전환되었습니다.");
+      setShowBudgetModal(false);
+    } catch (e) {
+      console.error("Failed to switch budget:", e);
+      showToast("가계부 전환에 실패했습니다.");
+    }
+    finally {
+      setSwitchingBudgetId(null);
+    }
+  };
 
   const loadPartyInfo = async () => {
     try {
@@ -366,6 +437,7 @@ export default function HomeScreen() {
 
   const dayTransactions = getTransactionsForDate(selectedDate);
   const monthTotals = getMonthlyTotals(selectedDate);
+  const [openDates, setOpenDates] = useState<Record<string, boolean>>({});
   // Ensure auth hook is initialized (subscription) without creating unused vars
   useAuth();
 
@@ -383,31 +455,56 @@ export default function HomeScreen() {
       <View className="pt-4 pb-4 px-4 bg-blue-500">
         <View className="flex-row justify-between items-center mb-3">
           <View className="flex-1">
-            {/* Title row above selects */}
-            <View>
-              {activeBudget ? (
-                activeBudget.type === "shared" ? (
-                  <View className="flex-row items-center">
-                    <Text className="text-white text-xl font-bold mr-2">
-                      {party?.id ? party.name : activeBudget.name}
-                    </Text>
-                    <View
-                      className={`px-2 py-1 rounded ${
-                        party?.userRole === "host" || activeBudget.role === "host" ? "bg-blue-600" : "bg-gray-600"
-                      }`}
-                    >
-                      <Text className="text-white text-xs font-semibold">
-                        {party?.userRole === "host" || activeBudget.role === "host" ? "파티장" : "파티원"}
+            {/* Title row above selects (tappable to open budget switcher) */}
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={async () => {
+                if (loadingBudgets) return;
+                setShowBudgetModal(true);
+                await loadBudgets();
+              }}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+              accessible
+              accessibilityRole="button"
+              style={{
+                alignSelf: "flex-start",
+                paddingVertical: 6,
+                paddingHorizontal: 8,
+                borderRadius: 8,
+                backgroundColor: "rgba(255,255,255,0.04)",
+              }}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center" }}>
+                {activeBudget ? (
+                  activeBudget.type === "shared" ? (
+                    <View className="flex-row items-center">
+                      <Text className="text-white text-xl font-bold mr-2">
+                        {party?.id ? party.name : activeBudget.name}
                       </Text>
+                      <View
+                        className={`px-2 py-1 rounded ${
+                          party?.userRole === "host" || activeBudget.role === "host" ? "bg-blue-600" : "bg-gray-600"
+                        }`}
+                      >
+                        <Text className="text-white text-xs font-semibold">
+                          {party?.userRole === "host" || activeBudget.role === "host" ? "파티장" : "파티원"}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
+                  ) : (
+                    <Text className="text-white text-xl font-bold">{activeBudget.name}</Text>
+                  )
                 ) : (
-                  <Text className="text-white text-xl font-bold">{activeBudget.name}</Text>
-                )
-              ) : (
-                <Text className="text-white text-xl font-bold">내 가계부</Text>
-              )}
-            </View>
+                  <Text className="text-white text-xl font-bold">내 가계부</Text>
+                )}
+
+                {loadingBudgets ? (
+                  <ActivityIndicator size="small" color="#fff" style={{ marginLeft: 8 }} />
+                ) : (
+                  <Ionicons name="chevron-down-outline" size={18} color="#ffffff" style={{ marginLeft: 8 }} />
+                )}
+              </View>
+            </TouchableOpacity>
 
             {/* Select boxes row (below title) */}
             <View className="flex-row items-center mt-2 justify-between">
@@ -732,35 +829,46 @@ export default function HomeScreen() {
                 return datesWithTx.map((day) => {
                   const txs = getTransactionsForDate(day);
                   const totals = getTotalForDate(day);
+                  const isOpen = !!openDates[day];
+                  const headerLabel = `${Number(day.split("-")[1])}월 ${Number(day.split("-")[2])}일`;
                   return (
                     <View key={day} className="mb-3">
-                      <View className="flex-row justify-between items-center mb-2">
-                        <Text className="font-semibold">{`${Number(day.split("-")[1])}월 ${Number(
-                          day.split("-")[2]
-                        )}일`}</Text>
-                        <Text className="text-sm">
-                          수입 {totals.income.toLocaleString()} · 지출 {totals.expense.toLocaleString()}
-                        </Text>
-                      </View>
+                      <TouchableOpacity
+                        onPress={() =>
+                          setOpenDates((prev) => ({ ...prev, [day]: !prev[day] }))
+                        }
+                        activeOpacity={0.85}
+                        className="flex-row justify-between items-center mb-2"
+                        style={{ paddingHorizontal: 4 }}
+                      >
+                        <View>
+                          <Text className="font-semibold">{headerLabel}</Text>
+                          <Text className="text-sm">수입 {totals.income.toLocaleString()} · 지출 {totals.expense.toLocaleString()}</Text>
+                        </View>
+                        <Ionicons name={isOpen ? "chevron-up-outline" : "chevron-down-outline"} size={18} color="#374151" />
+                      </TouchableOpacity>
 
-                      <View className="bg-white rounded-lg p-2 shadow-sm">
-                        {txs.map((t) => (
-                          <View
-                            key={t.id}
-                            className="flex-row justify-between items-center p-2 border-b last:border-b-0"
-                          >
-                            <View>
-                              <Text className="font-medium">{t.category}</Text>
-                              {t.description ? <Text className="text-xs text-gray-500">{t.description}</Text> : null}
-                            </View>
-                            <Text
-                              className={`font-semibold ${t.type === "income" ? "text-green-600" : "text-red-500"}`}
+                      {isOpen ? (
+                        <View style={{ backgroundColor: "#f3f4f6" }} className="rounded-lg p-2">
+                          {txs.map((t) => (
+                            <View
+                              key={t.id}
+                              className="flex-row justify-between items-center p-2 border-b last:border-b-0"
                             >
-                              {(t.type === "income" ? "+" : "-") + t.amount.toLocaleString()}원
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
+                              <View style={{ flex: 1 }}>
+                                <Text className="font-medium">{t.category}</Text>
+                                {t.description ? <Text className="text-xs text-gray-500">{t.description}</Text> : null}
+                              </View>
+                              <Text
+                                style={{ color: t.type === "income" ? "#16a34a" : "#ef4444" }}
+                                className="font-semibold"
+                              >
+                                {(t.type === "income" ? "+" : "-") + t.amount.toLocaleString()}원
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : null}
                     </View>
                   );
                 });
@@ -1001,6 +1109,73 @@ export default function HomeScreen() {
             </View>
           </View>
         </KeyboardAvoidingView>
+      </Modal>
+      {/* Budget switcher modal */}
+      <Modal visible={showBudgetModal} animationType="fade" transparent onRequestClose={() => setShowBudgetModal(false)}>
+        <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: 20 }}>
+          <View style={{ backgroundColor: "#fff", borderRadius: 12, padding: 12, maxHeight: "80%" }}>
+            <Text style={{ fontSize: 18, fontWeight: "700", marginBottom: 8 }}>가계부 선택</Text>
+            {budgetList.length === 0 ? (
+              <View style={{ padding: 20, alignItems: "center" }}>
+                <Text style={{ color: "#6b7280" }}>가계부가 없습니다</Text>
+              </View>
+            ) : (
+              <ScrollView>
+                {budgetList.map((b) => {
+                  const idKey = b.id ?? b.name ?? "unknown";
+                  const isActive = activeBudget && (b.id === activeBudget.id || b.name === activeBudget.name);
+                  const disabled = !!switchingBudgetId || loadingBudgets;
+                  return (
+                    <TouchableOpacity
+                      key={idKey}
+                      onPress={async () => {
+                        if (disabled) return;
+                        setSwitchingBudgetId(idKey);
+                        try {
+                          await switchBudget(b);
+                        } finally {
+                          setSwitchingBudgetId(null);
+                        }
+                      }}
+                      activeOpacity={0.85}
+                      disabled={disabled}
+                      style={{
+                        paddingVertical: 12,
+                        paddingHorizontal: 10,
+                        borderRadius: 10,
+                        marginBottom: 8,
+                        backgroundColor: isActive ? "#3b82f6" : "#f3f4f6",
+                        opacity: disabled ? 0.7 : 1,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                      }}
+                    >
+                      <View>
+                        <Text style={{ color: isActive ? "#fff" : "#111827", fontWeight: "600" }}>{b.name}</Text>
+                        {b.type === "shared" ? (
+                          <Text style={{ color: isActive ? "rgba(255,255,255,0.9)" : "#6b7280", fontSize: 12 }}>
+                            파티형
+                          </Text>
+                        ) : null}
+                      </View>
+                      {switchingBudgetId === idKey ? (
+                        <ActivityIndicator size="small" color={isActive ? "#fff" : "#111827"} />
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              onPress={() => setShowBudgetModal(false)}
+              style={{ marginTop: 10, paddingVertical: 12, borderRadius: 10, backgroundColor: "#efefef" }}
+            >
+              <Text style={{ textAlign: "center", fontWeight: "600" }}>취소</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );

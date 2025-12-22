@@ -3,7 +3,7 @@ import { Category } from "@/types/category";
 import { TransactionType } from "@/types/transaction";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { getAuthMode } from "./authMode";
-import { getActiveBudgetBookId, getUserParty } from "./party";
+import { getActiveBudgetBookId } from "./party";
 
 // UUID 생성 함수
 const generateUUID = (): string => {
@@ -113,15 +113,17 @@ export const addCategory = async (type: TransactionType, name: string): Promise<
       throw new Error("No user session found");
     }
 
-    const userParty = await getUserParty();
     const categoryId = generateUUID();
+    // Scope the new category to the currently active budget book (personal or specific party)
+    const active = await getActiveBudgetBookId();
+    const partyId = active && active !== "personal" ? active : null;
 
     const { data, error } = await supabase
       .from("categories")
       .insert({
         id: categoryId,
         user_id: session.user.id,
-        party_id: userParty?.partyId || null,
+        party_id: partyId,
         type,
         name,
       })
@@ -382,6 +384,16 @@ export const createDefaultCategoriesForParty = async (partyId: string, ownerUser
         data: { session },
       } = await supabase.auth.getSession();
       ownerId = session?.user?.id || undefined;
+    }
+
+    // If still missing ownerId (edge cases), try to fetch the party creator from the parties table
+    if (!ownerId) {
+      try {
+        const { data: partyRow, error: fetchErr } = await supabase.from("parties").select("created_by").eq("id", partyId).maybeSingle();
+        if (!fetchErr && partyRow?.created_by) ownerId = partyRow.created_by;
+      } catch (e) {
+        // ignore
+      }
     }
 
     const defaults = [

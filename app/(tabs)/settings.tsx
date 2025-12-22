@@ -4,42 +4,43 @@ import { supabase } from "@/lib/supabase";
 import { Category } from "@/types/category";
 import { BudgetBook, Party } from "@/types/party";
 import { TransactionType } from "@/types/transaction";
-import { emitPartyUpdate } from "@/utils/appEvents";
+import { emitPartyUpdate, onPartyUpdate } from "@/utils/appEvents";
 import {
-  addCategory,
-  createDefaultCategoriesForParty,
-  deleteCategory,
-  deletePersonalCategories,
-  loadCategories,
-  migratePersonalCategoriesToParty,
-  updateCategory,
+    addCategory,
+    createDefaultCategoriesForParty,
+    deleteCategory,
+    deletePersonalCategories,
+    loadCategories,
+    migratePersonalCategoriesToParty,
+    updateCategory,
 } from "@/utils/category";
 import {
-  activateBudgetBook,
-  createParty,
-  deleteParty,
-  getActiveBudgetBookId,
-  getAllBudgetBooks,
-  getParty,
-  getUserParty,
-  joinPartyByCode,
-  leaveParty,
-  removePartyMember,
-  updateParty,
+    activateBudgetBook,
+    createParty,
+    deleteParty,
+    getActiveBudgetBookId,
+    getAllBudgetBooks,
+    getParty,
+    getUserParty,
+    joinPartyByCode,
+    leaveParty,
+    removePartyMember,
+    updateParty,
 } from "@/utils/party";
 import { deletePersonalTransactions, migratePersonalTransactionsToParty } from "@/utils/storage";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import * as Clipboard from 'expo-clipboard';
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  ScrollView,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    ScrollView,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -244,6 +245,11 @@ export default function SettingsScreen() {
   const MAX_CATEGORIES_PER_TYPE = 20;
 
   useEffect(() => {
+    // Subscribe to party updates so this screen reloads when active budget changes elsewhere
+    const unsubscribeParty = onPartyUpdate(() => {
+      loadData().catch(() => {});
+    });
+    
     (async () => {
       try {
         const { data } = await supabase.auth.getUser();
@@ -255,6 +261,12 @@ export default function SettingsScreen() {
         // ignore
       }
     })();
+
+    return () => {
+      try {
+        unsubscribeParty();
+      } catch {}
+    };
   }, []);
 
   // Ensure nickname input shows the user's current nickname when opening the profile tab
@@ -417,9 +429,13 @@ export default function SettingsScreen() {
 
   const handleLeavePartyConfirm = async () => {
     try {
-      await leaveParty();
-      setParty(null);
+      // If deleteTargetId is set, leave that party; otherwise leave current party
+      const targetId = deleteTargetId ?? party?.id ?? null;
+      await leaveParty(targetId ?? undefined);
+      // If user left the currently-open party, clear it from state
+      if (targetId && party && targetId === party.id) setParty(null);
       setConfirmDialog(null);
+      setDeleteTargetId(null);
       Alert.alert("완료", "파티에서 나갔습니다.");
       await loadData();
     } catch (error: any) {
@@ -816,10 +832,15 @@ export default function SettingsScreen() {
                           {/* 활성화 표시 - 파란색 라인 */}
                           {isActive && <View className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500 rounded-l-lg" />}
 
-                          <View className="flex-row items-center justify-between">
-                            <View className="flex-1">
+                          <View style={{ flexDirection: "column" }}>
+                            <View>
                               <View className="flex-row items-center mb-1">
                                 <Text className="text-gray-800 font-semibold text-lg mr-2">{book.name}</Text>
+                                {book.id === "personal" && (
+                                  <View className="bg-yellow-100 px-2 py-1 rounded ml-2">
+                                    <Text className="text-yellow-800 text-xs font-semibold">기본</Text>
+                                  </View>
+                                )}
                                 {isShared && (
                                   <View className="bg-green-100 px-2 py-1 rounded">
                                     <Text className="text-green-700 text-xs font-semibold">공유</Text>
@@ -837,7 +858,22 @@ export default function SettingsScreen() {
                                 </Text>
                               )}
                               {isShared && book.inviteCode && (
-                                <Text className="text-gray-500 text-sm mt-2">초대코드: {book.inviteCode}</Text>
+                                <View className="flex-row items-center mt-2">
+                                  <Text className="text-gray-500 text-sm">초대코드: {book.inviteCode}</Text>
+                                  <TouchableOpacity
+                                    onPress={async () => {
+                                      try {
+                                        await Clipboard.setStringAsync(book.inviteCode || "");
+                                        Alert.alert("복사됨", "초대코드가 복사되었습니다.");
+                                      } catch (e) {
+                                        Alert.alert("오류", "초대코드 복사에 실패했습니다.");
+                                      }
+                                    }}
+                                    className="ml-3 bg-gray-200 px-2 py-1 rounded"
+                                  >
+                                    <Text className="text-sm text-gray-700">복사</Text>
+                                  </TouchableOpacity>
+                                </View>
                               )}
                               {isShared && book.members && book.members.length > 0 && (
                                 <View className="mt-2">
@@ -851,49 +887,62 @@ export default function SettingsScreen() {
                               )}
                             </View>
 
-                            <View className="flex-row items-center gap-2">
-                              {!isActive && (
-                                <TouchableOpacity
-                                  onPress={async () => {
-                                    try {
-                                      await activateBudgetBook(book.id);
-                                      await loadData();
-                                      Alert.alert("완료", "가계부가 활성화되었습니다.");
-                                    } catch (error: any) {
-                                      Alert.alert("오류", error?.message || "가계부 활성화 중 오류가 발생했습니다.");
-                                    }
-                                  }}
-                                  className="bg-blue-500 px-4 py-2 rounded"
-                                >
-                                  <Text className="text-white text-sm font-semibold">활성화</Text>
-                                </TouchableOpacity>
-                              )}
+                            <View style={{ borderTopWidth: 1, borderTopColor: "#e5e7eb", marginTop: 12, paddingTop: 10 }}>
+                              <View style={{ flexDirection: "row", justifyContent: "flex-end", gap: 8 }}>
+                                {!isActive && (
+                                  <TouchableOpacity
+                                    onPress={async () => {
+                                      try {
+                                        await activateBudgetBook(book.id);
+                                        await loadData();
+                                        Alert.alert("완료", "가계부가 활성화되었습니다.");
+                                      } catch (error: any) {
+                                        Alert.alert("오류", error?.message || "가계부 활성화 중 오류가 발생했습니다.");
+                                      }
+                                    }}
+                                    className="bg-blue-500 px-4 py-2 rounded"
+                                  >
+                                    <Text className="text-white text-sm font-semibold">활성화</Text>
+                                  </TouchableOpacity>
+                                )}
 
-                              {canEditName && (
-                                <TouchableOpacity
-                                  onPress={() => {
-                                    // open edit modal for this budget
-                                    setEditingBudgetId(book.id);
-                                    setPartyNameInput(book.name);
-                                    setEditPartyModalVisible(true);
-                                  }}
-                                  className="bg-gray-200 px-3 py-2 rounded"
-                                >
-                                  <Ionicons name="pencil-outline" size={16} color="#111827" />
-                                </TouchableOpacity>
-                              )}
+                                {canEditName && (
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      setEditingBudgetId(book.id);
+                                      setPartyNameInput(book.name);
+                                      setEditPartyModalVisible(true);
+                                    }}
+                                    className="bg-gray-200 px-3 py-2 rounded"
+                                  >
+                                    <Ionicons name="pencil-outline" size={16} color="#111827" />
+                                  </TouchableOpacity>
+                                )}
 
-                              {canDelete && (
-                                <TouchableOpacity
-                                  onPress={() => {
-                                    setDeleteTargetId(book.id);
-                                    setConfirmDialog("deleteParty");
-                                  }}
-                                  className="bg-red-500 px-3 py-2 rounded"
-                                >
-                                  <Ionicons name="trash-outline" size={16} color="#fff" />
-                                </TouchableOpacity>
-                              )}
+                                {canDelete && (
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      setDeleteTargetId(book.id);
+                                      setConfirmDialog("deleteParty");
+                                    }}
+                                    className="bg-red-500 px-3 py-2 rounded"
+                                  >
+                                    <Ionicons name="trash-outline" size={16} color="#fff" />
+                                  </TouchableOpacity>
+                                )}
+
+                                {isShared && book.role === "member" && (
+                                  <TouchableOpacity
+                                    onPress={() => {
+                                      setDeleteTargetId(book.id);
+                                      setConfirmDialog("leaveParty");
+                                    }}
+                                    className="bg-yellow-400 px-3 py-2 rounded"
+                                  >
+                                    <Text className="text-black text-sm">나가기</Text>
+                                  </TouchableOpacity>
+                                )}
+                              </View>
                             </View>
                           </View>
                         </View>

@@ -413,7 +413,7 @@ export const joinPartyByCode = async (inviteCode: string): Promise<Party | null>
 };
 
 // 파티 나가기
-export const leaveParty = async (): Promise<void> => {
+export const leaveParty = async (partyId?: string): Promise<void> => {
   try {
     const mode = await getAuthMode();
     if (mode === "guest") {
@@ -426,7 +426,11 @@ export const leaveParty = async (): Promise<void> => {
       throw new Error("No user session found");
     }
 
-    const { error } = await supabase.from("party_members").delete().eq("user_id", session.user.id);
+    // If a partyId is provided, only remove membership for that party; otherwise remove all memberships for user.
+    let query = supabase.from("party_members").delete().eq("user_id", session.user.id);
+    if (partyId) query = query.eq("party_id", partyId);
+
+    const { error } = await query;
 
     if (error) {
       console.error("Error leaving party:", error);
@@ -552,7 +556,10 @@ export const updateParty = async (partyId: string, newName: string): Promise<Par
         const {
           data: { session },
         } = await supabase.auth.getSession();
-        const uid = session?.user?.id ?? null;
+        const uid = session?.user?.id;
+        if (!uid) {
+          throw new Error("세션 정보가 없어 개인 가계부 이름을 저장할 수 없습니다.");
+        }
         await AsyncStorage.setItem(personalBudgetNameKey(uid), newName);
       } catch (e) {
         console.error("Failed to persist personal budget name:", e);
@@ -632,7 +639,7 @@ export const updateParty = async (partyId: string, newName: string): Promise<Par
 const ACTIVE_BUDGET_BOOK_KEY = "bb_active_budget_book";
 
 // 개인 가계부 이름 저장 키 (사용자별)
-const personalBudgetNameKey = (userId: string | null) => `bb_personal_name_${userId ?? "unknown"}`;
+const personalBudgetNameKey = (userId: string) => `bb_personal_name_${userId}`;
 
 // 활성화된 가계부 ID 가져오기
 export const getActiveBudgetBookId = async (): Promise<string | null> => {
@@ -691,8 +698,10 @@ export const getAllBudgetBooks = async (): Promise<BudgetBook[]> => {
     let personalName = "내 가계부";
     try {
       const uid = session.user?.id ?? null;
-      const storedName = await AsyncStorage.getItem(personalBudgetNameKey(uid));
-      if (storedName) personalName = storedName;
+      if (uid) {
+        const storedName = await AsyncStorage.getItem(personalBudgetNameKey(uid));
+        if (storedName) personalName = storedName;
+      }
     } catch (e) {
       // ignore
     }
